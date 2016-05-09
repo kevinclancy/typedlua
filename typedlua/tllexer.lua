@@ -11,6 +11,10 @@ local function getffp (s, i, t)
   return t.ffp or i, t
 end
 
+-- s - the entire subject of a cmt match
+-- i - the current position after a cmt match
+-- t - capture 1 of cmt match -- in tlparser ln 675, this is an errinfo table containing a subject and a filename
+-- n - a description of the thing that failed to parse: for types, it is "Type", etc.
 local function setffp (s, i, t, n)
   if not t.ffp or i > t.ffp then
     t.ffp = i
@@ -25,6 +29,12 @@ local function setffp (s, i, t, n)
   return false
 end
 
+--gets called when we fail to match an attempted token lex
+--perhaps ffp then stained for "failure file position"
+--name is just the name of the token that we failed to match, provided by caller
+--
+--produces 1st extra argument to match as first captured value
+--produces name as second captured value
 local function updateffp (name)
   return lpeg.Cmt(lpeg.Carg(1) * lpeg.Cc(name), setffp)
 end
@@ -64,13 +74,16 @@ local Comment = lpeg.P("--") * LongString /
 
 tllexer.Skip = (Space + Comment)^0
 
+--characters that an identifier may start with
 local idStart = lpeg.alpha + lpeg.P("_")
+--characters which may appear after the first character of an identifier
 local idRest = lpeg.alnum + lpeg.P("_")
 
 local Keywords = lpeg.P("and") + "break" + "do" + "elseif" + "else" + "end" +
                  "false" + "for" + "function" + "goto" + "if" + "in" +
                  "local" + "nil" + "not" + "or" + "repeat" + "return" +
-                 "then" + "true" + "until" + "while"
+                 "then" + "true" + "until" + "while" + 
+                 "class" + "abstract" + "method" + "field" + "constructor" + "finalizer"
 
 tllexer.Reserved = Keywords * -idRest
 

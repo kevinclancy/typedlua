@@ -22,6 +22,7 @@ stat:
   | `Break                                    -- break
   | apply
   | `Interface{ <string> type }
+  | `Class { <string> classelement* }
 
 expr:
   `Nil
@@ -37,6 +38,12 @@ expr:
   | apply
   | lhs
 
+classelement:
+  `Field { <string> type }
+  | `AbstractField { <string> type }
+  | `Method { <string> { ident* { `Dots type? }? } typelist? block }
+  | `AbstractMethod { <string> methodtype }
+  
 apply:
   `Call{ expr expr* }
   | `Invoke{ expr `String{ <string> } expr* }
@@ -210,6 +217,12 @@ function tlast.statInterface (pos, name, t)
   return { tag = "Interface", pos = pos, [1] = name, [2] = t }
 end
 
+--statClass : (number, string, boolean, class_element_array) -> (stat)
+function tlast.statClass(pos,isAbstract,name,t)
+  t.class = name
+  return { tag = "Class", pos = pos, [1] = name, [2] = isAbstract, [3] = t } 
+end
+
 -- statUserdata : (number, string, type) -> (stat)
 function tlast.statUserdata (pos, name, t)
   t.userdata = name
@@ -220,6 +233,36 @@ end
 function tlast.statLocalTypeDec (stat)
   stat.is_local = true
   return stat
+end
+
+--classElementConcreteField : (pos,name,ty) -> (classElement)
+function tlast.classElementConcreteField(pos,name,ty)
+  return { tag = "ConcreteClassField", pos = pos, [1] = name, [2] = ty }
+end
+
+--classElementAbstractField : (pos,name,ty) -> (classElement)
+function tlast.classElementAbstractField(pos,name,ty)
+  return { tag = "AbstractClassField", pos = pos, [1] = name, [2] = ty }
+end
+
+--classElementConcreteMethod : (pos,name,parlist,type?,block) -> (classElement)
+function tlast.classElementConcreteMethod(pos,name,parlist,rettype,body)
+  return { tag = "ConcreteClassMethod", pos = pos, [1] = name, [2] = parlist, [3] = rettype, [4] = body }
+end
+
+--classElementAbstractMethod : (pos,name,ty) -> (classElement)
+function tlast.classElementAbstractMethod(pos,name,ty)
+  return { tag = "AbstractClassMethod", pos = pos, [1] = name, [2] = ty }
+end
+
+--classElementConstructor : (pos,parlist,block) -> (classElement)
+function tlast.classElementConstructor(pos,parlist,body)
+  return { tag = "ClassConstructor", pos = pos, [1] = parlist, [2] = body }
+end
+
+--classElementFinalizer : (pos,block) -> (classElement)
+function tlast.classElementFinalizer(pos,body)
+  return { tag = "ClassFinalizer", pos = pos, [1] = body }
 end
 
 -- parlist
@@ -529,6 +572,52 @@ function var2str (var)
   return str
 end
 
+function classelem2str (classelem)
+  local tag = classelem.tag
+  local str = "`" .. tag
+  
+  if tag == "ConcreteClassField" then
+    str = str .. "{ "
+    str = str .. var2str(classelem[1]) .. ", "
+    str = str .. type2str(classelem[2])
+    str = str .. " }"
+  elseif tag == "AbstractClassField" then
+    str = str .. "{ "
+    str = str .. var2str(classelem[1]) .. ", "
+    str = str .. type2str(classelem[2])
+    str = str .. " }"
+  elseif tag == "ConcreteClassMethod" then
+    str = str .. "{ "
+    str = str .. var2str(classelem[1]) .. ", "
+    str = str .. parlist2str(classelem[2]) .. ", "
+    if classelem[3] ~= "NoReturnTypeAscription" then 
+      str = str .. type2str(classelem[3]) .. ", "
+    else
+      str = str .. "NoReturnTypeAscription" ..", "
+    end
+    str = str .. block2str(classelem[4])
+    str = str .. " }"
+  elseif tag == "AbstractClassMethod" then
+    str = str .. "{ "
+    str = str .. var2str(classelem[1]) .. ", "
+    str = str .. type2str(classelem[2])
+    str = str .. " }"
+  elseif tag == "ClassConstructor" then
+    str = str .. "{ "
+    str = str .. parlist2str(classelem[1]) .. ", "
+    str = str .. block2str(classelem[2]) 
+    str = str .. " }"
+  elseif tag == "ClassFinalizer" then
+    str = str .. "{ "
+    str = str .. block2str(classelem[1])
+    str = str .. " }"
+  else
+    error("expecting a class element, but got a" .. tag)
+  end
+  
+  return str
+end
+
 function varlist2str (varlist)
   local l = {}
   for k, v in ipairs(varlist) do
@@ -555,6 +644,17 @@ function parlist2str (parlist)
     if parlist[i][1] then
       l[i] = l[i] .. ":" .. type2str(parlist[i][1])
     end
+  end
+  return "{ " .. table.concat(l, ", ") .. " }"
+end
+
+function classelemlist2str (classelemlist)
+  local l = {}
+  local len = #classelemlist
+  local i = 1
+  while i <= len do
+    l[i] = classelem2str(classelemlist[i])
+    i = i + 1
   end
   return "{ " .. table.concat(l, ", ") .. " }"
 end
@@ -656,7 +756,7 @@ function stm2str (stm)
   local str = "`" .. tag
   if tag == "Do" then -- `Do{ stat* }
     local l = {}
-    for k, v in ipairs(stm) do
+    for k, v in ipairs(stm) do 
       l[k] = stm2str(v)
     end
     str = str .. "{ " .. table.concat(l, ", ") .. " }"
@@ -755,11 +855,19 @@ function stm2str (stm)
     str = str .. stm[1] .. ", "
     str = str .. type2str(stm[2])
     str = str .. " }"
+  elseif tag == "Class" then
+    local id = stm[1]
+    str = str .. "{ "
+    str = str .. id[1] .. ", "
+    str = str .. tostring(stm[2]) .. ", "
+    str = str .. classelemlist2str(stm[3])
+    str = str .. " }"
   else
     error("expecting a statement, but got a " .. tag)
   end
   return str
 end
+
 
 function block2str (block)
   local l = {}

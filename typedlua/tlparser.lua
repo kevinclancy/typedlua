@@ -1,5 +1,11 @@
 --[[
 This module implements Typed Lua parser
+
+CArgs: 
+1 - erroinfo table
+2 - strictness boolean flag
+3 - integer boolean flag (should be true for my purposes)
+
 ]]
 
 local tlparser = {}
@@ -15,6 +21,44 @@ local tltype = require "typedlua.tltype"
 local function chainl1 (pat, sep)
   return lpeg.Cf(pat * lpeg.Cg(sep * pat)^0, tlast.exprBinaryOp)
 end
+
+--[[
+Here is my initial plan for a class system.
+
+new keywords:
+-class
+-abstract
+-method
+-field
+-constructor
+-finalizer
+
+--declaration modeled after interface syntax
+local [abstract] class Foo
+  field x : number --concrete field x, must be assigned in constructor or error is raised
+  abstract field z : nnumber --abstract field, only allowed on abstract classes
+
+  init(x : number, y : number)
+    self.x = x --self.x must be assigned to an integer since a concrete field was declared
+    print(y)
+  end
+  
+  init secondInit(x : number)
+    --an alternative named constructor
+  end
+  
+  fin
+    self.obj:freeResources()
+    --cleanup happens here
+  end
+
+  method doit(y : number, x : number, ... : number) : number
+    self.x = y
+    return 3
+  end
+end
+
+]]
 
 local G = lpeg.P { "TypedLua";
   TypedLua = tllexer.Shebang^-1 * tllexer.Skip * lpeg.V("Chunk") * -1 +
@@ -34,6 +78,7 @@ local G = lpeg.P { "TypedLua";
                 lpeg.V("FunctionType") +
                 lpeg.V("TableType") +
                 lpeg.V("VariableType");
+               
   LiteralType = ((tllexer.token("false", "Type") * lpeg.Cc(false)) +
                 (tllexer.token("true", "Type") * lpeg.Cc(true)) +
                 tllexer.token(tllexer.Number, "Type") +
@@ -94,9 +139,46 @@ local G = lpeg.P { "TypedLua";
   TypeDec = tllexer.token(tllexer.Name, "Name") * lpeg.V("IdDecList") * tllexer.kw("end");
   Interface = lpeg.Cp() * tllexer.kw("interface") * lpeg.V("TypeDec") /
               tlast.statInterface +
-              lpeg.Cp() * tllexer.kw("typealias") *
-              tllexer.token(tllexer.Name, "Name") * tllexer.symb("=") * lpeg.V("Type") /
+              lpeg.Cp() * tllexer.kw("typealias") * 
+              lpeg.V("Id") * tllexer.symb("=") * lpeg.V("Type") /
               tlast.statInterface;
+  
+  ClassConcreteFieldDef = lpeg.Cp() * tllexer.kw("field") *
+                          lpeg.V("Id") * tllexer.symb(":") * 
+                          lpeg.V("Type") / tlast.classElementConcreteField;
+  
+  ClassAbstractFieldDef = lpeg.Cp() * tllexer.kw("abstract") * tllexer.kw("field") *
+                          lpeg.V("Id") * tllexer.symb(":") * lpeg.V("Type") /
+                          tlast.classElementAbstractField;
+                          
+  ClassConstructor = lpeg.Cp() * tllexer.kw("constructor") *
+                     tllexer.symb("(") * 
+                     lpeg.V("ParList") * tllexer.symb(")") * lpeg.V("Block") *
+                     tllexer.kw("end") / tlast.classElementConstructor;
+  
+  ClassFinalizer = lpeg.Cp() * tllexer.kw("finalizer") *
+                   lpeg.V("Block") * tllexer.kw("end") / tlast.classElementFinalizer;
+  
+  ClassAbstractMethodDef = lpeg.Cp() * tllexer.kw("abstract") * tllexer.kw("method") *
+                        lpeg.V("Id") * tllexer.symb(":") *
+                        lpeg.V("MethodType") / tlast.classElementAbstractMethod;
+  
+  ClassConcreteMethodDef =  lpeg.Cp() * tllexer.kw("method") *
+                         lpeg.V("Id") *
+                         tllexer.symb("(") * lpeg.V("ParList") * tllexer.symb(")") *
+                         (tllexer.symb(":") * lpeg.V("RetType") + lpeg.Cc("NoReturnTypeAscription")) * 
+                         lpeg.V("Block") * tllexer.kw("end") / 
+                         tlast.classElementConcreteMethod;
+  
+  ClassElement = lpeg.V("ClassConcreteFieldDef") + lpeg.V("ClassAbstractFieldDef") + 
+                 lpeg.V("ClassConstructor") + lpeg.V("ClassFinalizer") + 
+                 lpeg.V("ClassAbstractMethodDef") + lpeg.V("ClassConcreteMethodDef");
+             
+  ClassDecStat = lpeg.Cp() * 
+                 (tllexer.kw("abstract") * lpeg.Cc(true) + lpeg.Cc(false)) * 
+                 tllexer.kw("class") * lpeg.V("Id") * 
+                 lpeg.Ct(lpeg.V("ClassElement")^0) * tllexer.kw("end") / tlast.statClass;
+             
   -- parser
   Chunk = lpeg.V("Block");
   StatList = (tllexer.symb(";") + lpeg.V("Stat"))^0;
@@ -244,7 +326,7 @@ local G = lpeg.P { "TypedLua";
              (lpeg.V("SuffixedExp") * (lpeg.Cc(tlast.statApply))),
              function (s, i, s1, f, ...) return f(s1, ...) end);
   Assignment = ((tllexer.symb(",") * lpeg.V("LVar"))^1)^-1 * tllexer.symb("=") * lpeg.V("ExpList");
-  Stat = lpeg.V("IfStat") + lpeg.V("WhileStat") + lpeg.V("DoStat") + lpeg.V("ForStat") +
+  Stat = lpeg.V("ClassDecStat") + lpeg.V("IfStat") + lpeg.V("WhileStat") + lpeg.V("DoStat") + lpeg.V("ForStat") +
          lpeg.V("RepeatStat") + lpeg.V("FuncStat") + lpeg.V("LocalStat") +
          lpeg.V("LabelStat") + lpeg.V("BreakStat") + lpeg.V("GoToStat") +
          lpeg.V("TypeDecStat") + lpeg.V("ExprStat");
@@ -564,6 +646,71 @@ function traverse_explist (env, explist)
   return true
 end
 
+local function traverse_concrete_class_method (env, method)
+  tlst.begin_function(env)
+  tlst.begin_scope(env)
+  local status,msg = traverse_parlist(env,method[2])
+  if not status then return status, msg end
+  tlst.set_local(env,{ tag = "Id", "self"})
+  status, msg = traverse_block(env,method[4])
+  if not status then return status, msg end
+  tlst.end_scope(env)
+  tlst.end_function(env)
+    
+  return true
+end
+
+local function traverse_constructor (env, constructor)
+  tlst.begin_function(env)
+  tlst.begin_scope(env)
+  local status,msg = traverse_parlist(env,constructor[1])
+  if not status then return status, msg end
+  tlst.set_local(env,{ tag = "Id", "self" })
+  status, msg = traverse_block(env,constructor[2])
+  if not status then return status,msg end
+  tlst.end_scope(env)
+  tlst.end_function(env)
+    
+  return true
+end
+
+local function traverse_finalizer (env, finalizer)
+  tlst.begin_function(env)
+  tlst.begin_scope(env)
+  tlst.set_local(env,{ tag = "Id", "self"})
+  local status, msg = traverse_block(env,finalizer[1])
+  if not status then return status,msg end
+  tlst.end_scope(env)
+  tlst.end_function(env)  
+
+  return true
+end
+
+local function traverse_class (env, stm)
+  --iterate through methods, descending into constructors, 
+  --finalizers, and concrete methods with 'self' added to environment
+  for _,v in ipairs(stm[3]) do
+    if v.tag == "ConcreteClassField" or 
+       v.tag == "AbstractClassField" or 
+       v.tag == "AbstractClassMethod" then
+      --nothing to do here
+    elseif v.tag == "ConcreteClassMethod" then
+      local status, msg = traverse_concrete_class_method(env,v)
+      if not status then return status,msg end
+    elseif v.tag == "ClassConstructor" then
+      local status, msg = traverse_constructor(env,v)
+      if not status then return status,msg end      
+    elseif v.tag == "ClassFinalizer" then
+      local status, msg = traverse_finalizer(env,v)
+      if not status then return status,msg end          
+    end
+  end
+  
+  tlst.set_local(env,stm[1]) --add class name to environment
+  
+  return true 
+end
+
 function traverse_stm (env, stm)
   local tag = stm.tag
   if tag == "Do" then
@@ -600,6 +747,8 @@ function traverse_stm (env, stm)
     return traverse_invoke(env, stm)
   elseif tag == "Interface" then
     return traverse_interface(env, stm)
+  elseif tag == "Class" then
+    return traverse_class(env,stm)
   else
     error("trying to traverse a statement, but got a " .. tag)
   end
