@@ -376,7 +376,7 @@ local function get_elem_types (env, elems)
 end
 
 local function check_constructor_self (env, tself)
-  assert(tself.tag == "TTable" and tself.unique)
+  assert(tself.tag == "TTable" and tself.closed)
   local msg = "constructed self type '%s' missing field %s"
   for _,field in ipairs(tself) do
       if field.missing then
@@ -456,7 +456,7 @@ local function check_class (env, stm)
         for _,field in ipairs(t_self_init) do
           field.missing = true
         end
-        t_self_init.unique = true
+        t_self_init.closed = true
     
         check_constructor(env, parlist, body, t_self_init, pos)
       elseif elem.tag == "ClassFinalizer" then
