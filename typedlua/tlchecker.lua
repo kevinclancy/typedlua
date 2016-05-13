@@ -375,26 +375,20 @@ local function get_elem_types (env, elems)
     return constructors,methods,fields
 end
 
-local function check_constructor_self (env, tself, texpected)
+local function check_constructor_self (env, tself)
   assert(tself.tag == "TTable" and tself.unique)
-  assert(texpected.tag == "TTable")
-  
-  local msg = "constructed self type '%s' does not match '%s'"
-  
-  local texpected = tltype.unfold(texpected)
-  if tltype.subtype(tself, texpected) then
-  elseif tltype.consistent_subtype(tself, texpected) then
-    msg = string.format(msg, tltype.tostring(tself), tltype.tostring(texpected))
-    typeerror(env, "any", msg, pos)
-  else
-    msg = string.format(msg, tltype.tostring(tself), tltype.tostring(texpected))
-    typeerror(env, "self", msg, pos)
+  local msg = "constructed self type '%s' missing field %s"
+  for _,field in ipairs(tself) do
+      if field.missing then
+        local msg = string.format(msg, tltype.tostring(tself), tltype.tostring(field[1]))
+        typeerror(env, "self", msg, pos)  
+      end
   end
 end
 
-local function check_constructor (env, idlist, body, tself, texpectedself, pos)
+local function check_constructor (env, idlist, body, tself, pos)
   local oself = env.self
-  env.self = tself
+  env.self = nil
   tlst.begin_function(env)
   tlst.set_in_constructor(env)
   tlst.begin_scope(env)  
@@ -411,11 +405,11 @@ local function check_constructor (env, idlist, body, tself, texpectedself, pos)
     tlst.set_local(env,v)
   end
   check_masking(env,"self",pos)
-  tlst.set_local(env, { tag = "Id", pos = pos, [1] = "self", ["type"] = tltype.Self()})
+  tlst.set_local(env, { tag = "Id", pos = pos, [1] = "self", ["type"] = tself})
   local r = check_block(env,body)
   if not r then tlst.set_return_type(env, tltype.Tuple({ Nil }, true)) end
   check_unused_locals(env)
-  check_constructor_self(env, tself, texpectedself)
+  check_constructor_self(env, tself)
   tlst.end_scope(env)
   tlst.end_function(env)
   env.self = oself
@@ -458,14 +452,13 @@ local function check_class (env, stm)
         local name, parlist, body = elem[1], elem[2], elem[3]
         
         --TODO: the self constructor type should contain inherited fields if super is called
-        local t_self_init = tltype.Table()
+        local t_self_init = tltype.Table(table.unpack(instance_fields))
+        for _,field in ipairs(t_self_init) do
+          field.missing = true
+        end
         t_self_init.unique = true
     
-        --the type we're comparing self against at the bottom of our constructors (
-        local t_self_target = tltype.Table(table.unpack(instance_fields))
-        t_self_target.fixed = true
-    
-        check_constructor(env, parlist, body, t_self_init, t_self_target, pos)
+        check_constructor(env, parlist, body, t_self_init, pos)
       elseif elem.tag == "ClassFinalizer" then
       
       end
@@ -1362,6 +1355,12 @@ local function check_assignment (env, varlist, explist)
       l.assigned = true
     elseif tag == "Index" then
       local t1, t2 = get_type(v[1]), get_type(v[2])
+      if tltype.isTable(t1) then
+        local field = tltype.getFieldTable(t2,t1)
+        if field.missing then
+          field.missing = nil
+        end
+      end
     end
   end
   return false
@@ -1645,9 +1644,15 @@ local function check_index (env, exp)
   local msg = "attempt to index '%s' with '%s'"
   t1 = replace_self(env, t1, env.self)
   if tltype.isTable(t1) then
+    local field = tltype.getFieldTable(t2,t1)
     -- FIX: methods should not leave objects, this is unsafe!
     local field_type = replace_self(env, tltype.getField(t2, t1), tltype.Any())
-    if not tltype.isNil(field_type) then
+    if field.missing then 
+      msg = "attempt to access missing field %s"
+      msg = string.format(msg, tltype.tostring(t2))
+      typeerror(env, "index", msg, exp.pos)
+      set_type(exp, Nil)
+    elseif not tltype.isNil(field_type) then
       set_type(exp, field_type)
     else
       if exp1.tag == "Id" and exp1[1] == "_ENV" and exp2.tag == "String" then
