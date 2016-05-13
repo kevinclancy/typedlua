@@ -452,6 +452,18 @@ function tltype.getField (f, t)
   end
 end
 
+--rather than getting the value that corresponds to a field,
+--get the table that represents the field
+function tltype.getFieldTable(k,t)
+  assert(tltype.isTable(t))
+  for _, v in ipairs(t) do
+    if tltype.consistent_subtype(k, v[1]) then
+      return v
+    end
+  end
+  error("BUG: tried to get a field that does not exist")
+end
+
 -- fieldlist : ({ident}, type) -> (field*)
 function tltype.fieldlist (idlist, t)
   local l = {}
