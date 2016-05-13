@@ -309,6 +309,9 @@ function code_stm (stm, fmt)
     return indent(code_invoke(stm, fmt), fmt)
   elseif tag == "Interface" then
     return ""
+  elseif tag == "Class" then
+    --TODO: generate actual code
+    return ""
   else
     error("tyring to generate code for a statement, but got " .. tag)
   end

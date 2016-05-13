@@ -294,6 +294,187 @@ local function check_interface (env, stm)
   return false
 end
 
+local function check_parameters (env, parlist, selfimplicit, pos)
+  local len = #parlist
+  if len == 0 then
+    if env.strict then
+      return tltype.Void()
+    else
+      return tltype.Tuple({ Value }, true)
+    end
+  else
+    local l = {}
+    if parlist[1][1] == "self" and not parlist[1][2] and not selfimplicit then
+      parlist[1][2] = Self
+    end
+    for i = 1, len do
+      if not parlist[i][2] then parlist[i][2] = Any end
+      l[i] = replace_names(env, parlist[i][2], pos)
+    end
+    if parlist[len].tag == "Dots" then
+      local t = parlist[len][1] or Any
+      l[len] = t
+      tlst.set_vararg(env, t)
+      return tltype.Tuple(l, true)
+    else
+      if env.strict then
+        return tltype.Tuple(l)
+      else
+        l[len + 1] = Value
+        return tltype.Tuple(l, true)
+      end
+    end
+  end
+end
+
+-- returns constructors,methods,fields
+-- where each returned value maps names to types
+local function get_elem_types (env, elems)
+    local constructors = {}
+    local methods = {}
+    local fields = {}
+    
+    local function check_redecl(name,pos)
+        if fields[name] or methods[name] or constructors[name] then
+          local msg = string.format("class element %s redeclared",name)
+          typeerror(env, "self", msg, pos)
+        end      
+    end
+    
+    for _,elem in ipairs(elems) do
+      if elem.tag == "ConcreteClassField" then
+        local name = elem[1][1]
+        check_redecl(name,elem.pos)
+        fields[name] = elem[2]
+      elseif elem.tag == "AbstractClassField" then
+        local name,t = elem[1][1], elem[2]
+        check_redecl(name,elem.pos)  
+        --TODO: handle abstract vs. concrete fields
+        fields[name] = t
+      elseif elem.tag == "ConcreteClassMethod" then
+        local name,parlist,tret = elem[1][1],elem[2],elem[3]
+        check_redecl(name,elem.pos)         
+        local t1 = check_parameters(env, parlist, true, elem.pos)
+        local t2 = tret
+        methods[name] = tltype.Function(t1, t2, true)
+      elseif elem.tag == "AbstractClassMethod" then
+        local name, t = elem[1][1], elem[2] 
+        check_redecl(name,elem.pos)  
+        methods[name] = t
+      elseif elem.tag == "ClassConstructor" then
+        local name,parlist = elem[1][1],elem[2]
+        local t1 = check_parameters(env, parlist, false, elem.pos)
+        constructors[name] = tltype.Function(t1, tltype.Void(), false)
+      elseif elem.tag == "ClassFinalizer" then
+        --nothing to do here
+      else
+        error("cannot type check class element " .. elem.tag)
+      end
+    end 
+    
+    return constructors,methods,fields
+end
+
+local function check_constructor_self (env, tself, texpected)
+  assert(tself.tag == "TTable" and tself.unique)
+  assert(texpected.tag == "TTable")
+  
+  local msg = "constructed self type '%s' does not match '%s'"
+  
+  local texpected = tltype.unfold(texpected)
+  if tltype.subtype(tself, texpected) then
+  elseif tltype.consistent_subtype(tself, texpected) then
+    msg = string.format(msg, tltype.tostring(tself), tltype.tostring(texpected))
+    typeerror(env, "any", msg, pos)
+  else
+    msg = string.format(msg, tltype.tostring(tself), tltype.tostring(texpected))
+    typeerror(env, "self", msg, pos)
+  end
+end
+
+local function check_constructor (env, idlist, body, tself, texpectedself, pos)
+  local oself = env.self
+  env.self = tself
+  tlst.begin_function(env)
+  tlst.set_in_constructor(env)
+  tlst.begin_scope(env)  
+  local input_type = check_parameters(env, idlist, true, idlist.pos)
+  local output_type = tltype.Tuple({ Nil }, true)
+  local t = tltype.Function(input_type,output_type)
+  local len = #idlist
+  if len > 0 and idlist[len].tag == "Dots" then len = len - 1 end
+  for k = 1,len do
+    local v = idlist[k]
+    v[2] = replace_names(env, v[2], v.pos)
+    set_type(v, v[2])
+    check_masking(env, v[1], v.pos)
+    tlst.set_local(env,v)
+  end
+  check_masking(env,"self",pos)
+  tlst.set_local(env, { tag = "Id", pos = pos, [1] = "self", ["type"] = tltype.Self()})
+  local r = check_block(env,body)
+  if not r then tlst.set_return_type(env, tltype.Tuple({ Nil }, true)) end
+  check_unused_locals(env)
+  check_constructor_self(env, tself, texpectedself)
+  tlst.end_scope(env)
+  tlst.end_function(env)
+  env.self = oself
+end
+
+local function check_class (env, stm)
+  local name, isAbstract, elems = stm[1], stm[2], stm[3]
+  if tlst.get_interface(env, name) then
+    local msg = "attempt to redeclare type '%s'"
+    msg = string.format(msg, name)
+    typeerror(env, "alias", msg, stm.pos)
+  else
+    local t_constructors, t_methods, t_fields = get_elem_types(env, elems)
+    
+    --TODO: handle inheritance
+    
+    --all instance elements, both fields and methods
+    local instance_elements = {}
+    --instance fields only
+    local instance_fields = {}
+    for k,v in pairs(t_methods) do 
+      instance_elements[#instance_elements+1] = tltype.Field(true,tltype.Literal(k),v) 
+    end
+    for k,v in pairs(t_fields) do 
+      --TODO: allow const qualifiers before field definitions
+      --for now, they are non-const by default
+      instance_elements[#instance_elements+1] = tltype.Field(false,tltype.Literal(k),v)
+      instance_fields[#instance_fields+1] = tltype.Field(false,tltype.Literal(k),v) 
+    end
+    local t_instance = tltype.Table(instance_elements)
+    t_instance.fixed = true
+    
+    for _,elem in ipairs(elems) do
+      if elem.tag == "ConcreteClassMethod" then
+        local name,parlist,tret,body = elem[1], elem[2], elem[3], elem[4]
+        
+        -- begin scope, begin function scope, as in check_function
+        
+      elseif elem.tag == "ClassConstructor" then
+        local name, parlist, body = elem[1], elem[2], elem[3]
+        
+        --TODO: the self constructor type should contain inherited fields if super is called
+        local t_self_init = tltype.Table()
+        t_self_init.unique = true
+    
+        --the type we're comparing self against at the bottom of our constructors (
+        local t_self_target = tltype.Table(table.unpack(instance_fields))
+        t_self_target.fixed = true
+    
+        check_constructor(env, parlist, body, t_self_init, t_self_target, pos)
+      elseif elem.tag == "ClassFinalizer" then
+      
+      end
+    end
+    
+    --add t_instance to interface environment
+  end
+end
+
 local function check_userdata (env, stm)
   local name, t, is_local = stm[1], stm[2], stm.is_local
   if tlst.get_userdata(env, name) then
@@ -641,39 +822,6 @@ local function check_paren (env, exp)
   set_type(exp, tltype.first(t1))
 end
 
-local function check_parameters (env, parlist, pos)
-  local len = #parlist
-  if len == 0 then
-    if env.strict then
-      return tltype.Void()
-    else
-      return tltype.Tuple({ Value }, true)
-    end
-  else
-    local l = {}
-    if parlist[1][1] == "self" and not parlist[1][2] then
-      parlist[1][2] = Self
-    end
-    for i = 1, len do
-      if not parlist[i][2] then parlist[i][2] = Any end
-      l[i] = replace_names(env, parlist[i][2], pos)
-    end
-    if parlist[len].tag == "Dots" then
-      local t = parlist[len][1] or Any
-      l[len] = t
-      tlst.set_vararg(env, t)
-      return tltype.Tuple(l, true)
-    else
-      if env.strict then
-        return tltype.Tuple(l)
-      else
-        l[len + 1] = Value
-        return tltype.Tuple(l, true)
-      end
-    end
-  end
-end
-
 local function check_explist (env, explist, lselfs)
   lselfs = lselfs or {}
   for k, v in ipairs(explist) do
@@ -709,7 +857,7 @@ local function check_function (env, exp, tself)
   end
   tlst.begin_function(env)
   tlst.begin_scope(env)
-  local input_type = check_parameters(env, idlist, exp.pos)
+  local input_type = check_parameters(env, idlist, false, exp.pos)
   local t = tltype.Function(input_type, ret_type)
   local len = #idlist
   if len > 0 and idlist[len].tag == "Dots" then len = len - 1 end
@@ -1097,7 +1245,7 @@ local function check_localrec (env, id, exp)
     infer_return = true
   end
   tlst.begin_function(env)
-  local input_type = check_parameters(env, idlist, exp.pos)
+  local input_type = check_parameters(env, idlist, false, exp.pos)
   local t = tltype.Function(input_type, ret_type)
   id[2] = t
   set_type(id, t)
@@ -1159,6 +1307,11 @@ local function explist2typelist (explist)
 end
 
 local function check_return (env, stm)
+  if tlst.get_in_constructor(env) then
+    local msg = "constructors should not return values."  
+    typeerror(env,"ret",msg,stm.pos)
+  end
+  
   check_explist(env, stm)
   local t = explist2typelist(stm)
   tlst.set_return_type(env, tltype.general(t))
@@ -1540,7 +1693,7 @@ function check_var (env, var, exp)
       if not tltype.isNil(field_type) then
         set_type(var, field_type)
       else
-        if t1.open then
+        if t1.open or t1.unique then
           if exp then
             local t3 = tltype.general(get_type(exp))
             local t = tltype.general(t1)

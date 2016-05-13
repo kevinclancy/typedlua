@@ -218,9 +218,8 @@ function tlast.statInterface (pos, name, t)
 end
 
 --statClass : (number, string, boolean, class_element_array) -> (stat)
-function tlast.statClass(pos,isAbstract,name,t)
-  t.class = name
-  return { tag = "Class", pos = pos, [1] = name, [2] = isAbstract, [3] = t } 
+function tlast.statClass(pos,isAbstract,name,elems)
+  return { tag = "Class", pos = pos, [1] = name, [2] = isAbstract, [3] = elems } 
 end
 
 -- statUserdata : (number, string, type) -> (stat)
@@ -245,7 +244,7 @@ function tlast.classElementAbstractField(pos,name,ty)
   return { tag = "AbstractClassField", pos = pos, [1] = name, [2] = ty }
 end
 
---classElementConcreteMethod : (pos,name,parlist,type?,block) -> (classElement)
+--classElementConcreteMethod : (pos,name,parlist,type,block) -> (classElement)
 function tlast.classElementConcreteMethod(pos,name,parlist,rettype,body)
   return { tag = "ConcreteClassMethod", pos = pos, [1] = name, [2] = parlist, [3] = rettype, [4] = body }
 end
@@ -256,8 +255,8 @@ function tlast.classElementAbstractMethod(pos,name,ty)
 end
 
 --classElementConstructor : (pos,parlist,block) -> (classElement)
-function tlast.classElementConstructor(pos,parlist,body)
-  return { tag = "ClassConstructor", pos = pos, [1] = parlist, [2] = body }
+function tlast.classElementConstructor(pos,name, parlist,body)
+  return { tag = "ClassConstructor", pos = pos, [1] = name, [2] = parlist, [3] = body }
 end
 
 --classElementFinalizer : (pos,block) -> (classElement)

@@ -218,6 +218,17 @@ function tlst.is_vararg (env)
   if t then return true else return false end
 end
 
+-- set_in_constructor : (env) -> ()
+function tlst.set_in_constructor(env)
+  env["function"][env.fscope].in_constructor = true
+end
+
+-- get_in_constructor (env) -> (boolean)
+function tlst.get_in_constructor(env)
+  env["function"][env.fscope].in_constructor = true
+end
+
+
 -- set_return_type : (env, type) -> ()
 function tlst.set_return_type (env, t)
   table.insert(env["function"][env.fscope]["return_type"], t)

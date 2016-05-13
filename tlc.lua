@@ -1,0 +1,134 @@
+#!/usr/bin/env lua
+
+local tlast = require "typedlua.tlast"
+local tlparser = require "typedlua.tlparser"
+local tlchecker = require "typedlua.tlchecker"
+local tlcode = require "typedlua.tlcode"
+
+local VERSION = "scm"
+local PROGNAME = "tlc"
+local OUTPUT
+
+local DUMPAST = false
+local PRINTAST = false
+
+local STRICT = false
+local WARNINGS = false
+local INTEGER = false
+if _VERSION == "Lua 5.3" then INTEGER = true end
+
+local progname = PROGNAME
+
+local USAGE = [[
+usage: %s [options] [filename]
+Available options are:
+-d	dump the AST
+-h	print this help
+-o name	output to file 'name' (default is '%s')
+-p	print the AST
+-s	strict mode on
+-v	print current version
+-w	consistent-subtyping warnings on
+]]
+
+local function usage (msg)
+  if msg ~= nil then
+    io.stderr:write(string.format("%s: %s\n", progname, msg))
+  end
+  io.stderr:write(string.format(USAGE, progname, "tlc.lua"))
+  os.exit(1)
+end
+
+local function doargs ()
+  local i = 1
+  while i <= #arg do
+    if string.find(arg[i], "^-") == nil then
+      return i
+    elseif arg[i] == "-d" then
+      DUMPAST = true
+    elseif arg[i] == "-h" then
+      usage()
+    elseif arg[i] == "-o" then
+      i = i + 1
+      if arg[i] == nil or string.find(arg[i], "^-") then
+        usage("'-o' needs argument")
+      else
+        OUTPUT = arg[i]
+      end
+    elseif arg[i] == "-p" then
+      PRINTAST = true
+    elseif arg[i] == "-s" then
+      STRICT = true
+    elseif arg[i] == "-v" then
+      io.write(string.format("Typed Lua %s\n", VERSION))
+      os.exit(0)
+    elseif arg[i] == "-w" then
+      WARNINGS = true
+    else
+      usage(string.format("'%s' unknown option", arg[i]))
+    end
+    i = i + 1
+  end
+  return i
+end
+
+local function getcontents (filename)
+  local file = assert(io.open(filename, "r"))
+  local contents = file:read("*a")
+  file:close()
+  return contents
+end
+
+local function setcontents (contents, filename)
+  local file = assert(io.open(filename, "w"))
+  file:write(contents)
+  file:write("\n")
+  file:close()
+end
+
+if #arg < 1 then
+  usage("no input file given")
+end
+
+local i = doargs()
+local filename = arg[i]
+if not filename then
+  usage("no input file given")
+end
+
+if not OUTPUT then
+  OUTPUT = filename:gsub("[.]tl$", ".lua")
+end
+
+local subject = getcontents(filename)
+
+local ast, error_msg = tlparser.parse(subject, filename, STRICT, INTEGER)
+if not ast then
+  print(error_msg)
+  os.exit(1)
+end
+
+if DUMPAST and PRINTAST then
+  tlast.dump(ast)
+  print(tlast.tostring(ast))
+  os.exit(0)
+end
+
+if DUMPAST then
+  tlast.dump(ast)
+  os.exit(0)
+end
+
+if PRINTAST then
+  print(tlast.tostring(ast))
+  os.exit(0)
+end
+
+local error_msg = tlchecker.typecheck(ast, subject, filename, STRICT, INTEGER)
+local error_msg, status = tlchecker.error_msgs(error_msg, WARNINGS)
+if error_msg then print(error_msg) end
+
+local generated_code = tlcode.generate(ast)
+setcontents(generated_code, OUTPUT)
+
+os.exit(status)
