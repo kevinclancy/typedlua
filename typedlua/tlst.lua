@@ -225,7 +225,7 @@ end
 
 -- get_in_constructor (env) -> (boolean)
 function tlst.get_in_constructor(env)
-  env["function"][env.fscope].in_constructor = true
+  return env["function"][env.fscope].in_constructor
 end
 
 
