@@ -327,146 +327,6 @@ local function check_parameters (env, parlist, selfimplicit, pos)
   end
 end
 
--- returns constructors,methods,fields
--- where each returned value maps names to types
-local function get_elem_types (env, elems)
-    local constructors = {}
-    local methods = {}
-    local fields = {}
-    
-    local function check_redecl(name,pos)
-        if fields[name] or methods[name] or constructors[name] then
-          local msg = string.format("class element %s redeclared",name)
-          typeerror(env, "self", msg, pos)
-        end      
-    end
-    
-    for _,elem in ipairs(elems) do
-      if elem.tag == "ConcreteClassField" then
-        local name = elem[1][1]
-        check_redecl(name,elem.pos)
-        fields[name] = elem[2]
-      elseif elem.tag == "AbstractClassField" then
-        local name,t = elem[1][1], elem[2]
-        check_redecl(name,elem.pos)  
-        --TODO: handle abstract vs. concrete fields
-        fields[name] = t
-      elseif elem.tag == "ConcreteClassMethod" then
-        local name,parlist,tret = elem[1][1],elem[2],elem[3]
-        check_redecl(name,elem.pos)         
-        local t1 = check_parameters(env, parlist, true, elem.pos)
-        local t2 = tret
-        methods[name] = tltype.Function(t1, t2, true)
-      elseif elem.tag == "AbstractClassMethod" then
-        local name, t = elem[1][1], elem[2] 
-        check_redecl(name,elem.pos)  
-        methods[name] = t
-      elseif elem.tag == "ClassConstructor" then
-        local name,parlist = elem[1][1],elem[2]
-        local t1 = check_parameters(env, parlist, false, elem.pos)
-        constructors[name] = tltype.Function(t1, tltype.Void(), false)
-      elseif elem.tag == "ClassFinalizer" then
-        --nothing to do here
-      else
-        error("cannot type check class element " .. elem.tag)
-      end
-    end 
-    
-    return constructors,methods,fields
-end
-
-local function check_constructor_self (env, tself)
-  assert(tself.tag == "TTable" and tself.closed)
-  local msg = "constructed self type '%s' missing field %s"
-  for _,field in ipairs(tself) do
-      if field.missing then
-        local msg = string.format(msg, tltype.tostring(tself), tltype.tostring(field[1]))
-        typeerror(env, "self", msg, pos)  
-      end
-  end
-end
-
-local function check_constructor (env, idlist, body, tself, pos)
-  local oself = env.self
-  env.self = nil
-  tlst.begin_function(env)
-  tlst.set_in_constructor(env)
-  tlst.begin_scope(env)  
-  local input_type = check_parameters(env, idlist, true, idlist.pos)
-  local output_type = tltype.Tuple({ Nil }, true)
-  local t = tltype.Function(input_type,output_type)
-  local len = #idlist
-  if len > 0 and idlist[len].tag == "Dots" then len = len - 1 end
-  for k = 1,len do
-    local v = idlist[k]
-    v[2] = replace_names(env, v[2], v.pos)
-    set_type(v, v[2])
-    check_masking(env, v[1], v.pos)
-    tlst.set_local(env,v)
-  end
-  check_masking(env,"self",pos)
-  tlst.set_local(env, { tag = "Id", pos = pos, [1] = "self", ["type"] = tself})
-  local r = check_block(env,body)
-  if not r then tlst.set_return_type(env, tltype.Tuple({ Nil }, true)) end
-  check_unused_locals(env)
-  check_constructor_self(env, tself)
-  tlst.end_scope(env)
-  tlst.end_function(env)
-  env.self = oself
-end
-
-local function check_class (env, stm)
-  local name, isAbstract, elems = stm[1], stm[2], stm[3]
-  if tlst.get_interface(env, name) then
-    local msg = "attempt to redeclare type '%s'"
-    msg = string.format(msg, name)
-    typeerror(env, "alias", msg, stm.pos)
-  else
-    local t_constructors, t_methods, t_fields = get_elem_types(env, elems)
-    
-    --TODO: handle inheritance
-    
-    --all instance elements, both fields and methods
-    local instance_elements = {}
-    --instance fields only
-    local instance_fields = {}
-    for k,v in pairs(t_methods) do 
-      instance_elements[#instance_elements+1] = tltype.Field(true,tltype.Literal(k),v) 
-    end
-    for k,v in pairs(t_fields) do 
-      --TODO: allow const qualifiers before field definitions
-      --for now, they are non-const by default
-      instance_elements[#instance_elements+1] = tltype.Field(false,tltype.Literal(k),v)
-      instance_fields[#instance_fields+1] = tltype.Field(false,tltype.Literal(k),v) 
-    end
-    local t_instance = tltype.Table(instance_elements)
-    t_instance.fixed = true
-    
-    for _,elem in ipairs(elems) do
-      if elem.tag == "ConcreteClassMethod" then
-        local name,parlist,tret,body = elem[1], elem[2], elem[3], elem[4]
-        
-        -- begin scope, begin function scope, as in check_function
-        
-      elseif elem.tag == "ClassConstructor" then
-        local name, parlist, body = elem[1], elem[2], elem[3]
-        
-        --TODO: the self constructor type should contain inherited fields if super is called
-        local t_self_init = tltype.Table(table.unpack(instance_fields))
-        for _,field in ipairs(t_self_init) do
-          field.missing = true
-        end
-        t_self_init.closed = true
-    
-        check_constructor(env, parlist, body, t_self_init, pos)
-      elseif elem.tag == "ClassFinalizer" then
-      
-      end
-    end
-    
-    --add t_instance to interface environment
-  end
-end
 
 local function check_userdata (env, stm)
   local name, t, is_local = stm[1], stm[2], stm.is_local
@@ -880,6 +740,173 @@ local function check_function (env, exp, tself)
   tlst.end_function(env)
   set_type(exp, t)
   env.self = oself
+end
+
+
+-- returns constructors,methods,fields
+-- where each returned value maps names to types
+local function get_elem_types (env, elems)
+    local constructors = {}
+    local methods = {}
+    local fields = {}
+    
+    local function check_redecl(name,pos)
+        if fields[name] or methods[name] or constructors[name] then
+          local msg = string.format("class element %s redeclared",name)
+          typeerror(env, "self", msg, pos)
+        end      
+    end
+    
+    for _,elem in ipairs(elems) do
+      if elem.tag == "ConcreteClassField" then
+        local name = elem[1][1]
+        check_redecl(name,elem.pos)
+        fields[name] = elem[2]
+      elseif elem.tag == "AbstractClassField" then
+        local name,t = elem[1][1], elem[2]
+        check_redecl(name,elem.pos)  
+        --TODO: handle abstract vs. concrete fields
+        fields[name] = t
+      elseif elem.tag == "ConcreteClassMethod" then
+        local name,parlist,tret = elem[1][1],elem[2],elem[3]
+        check_redecl(name,elem.pos)         
+        local t1 = check_parameters(env, parlist, true, elem.pos)
+        local t2 = tret
+        methods[name] = tltype.Function(t1, t2, true)
+      elseif elem.tag == "AbstractClassMethod" then
+        local name, t = elem[1][1], elem[2] 
+        check_redecl(name,elem.pos)  
+        methods[name] = t
+      elseif elem.tag == "ClassConstructor" then
+        local name,parlist = elem[1][1],elem[2]
+        local t1 = check_parameters(env, parlist, false, elem.pos)
+        constructors[name] = tltype.Function(t1, tltype.Void(), false)
+      elseif elem.tag == "ClassFinalizer" then
+        --nothing to do here
+      else
+        error("cannot type check class element " .. elem.tag)
+      end
+    end 
+    
+    return constructors,methods,fields
+end
+
+local function check_constructor_self (env, tself)
+  assert(tself.tag == "TTable" and tself.closed)
+  local msg = "constructed self type '%s' missing field %s"
+  for _,field in ipairs(tself) do
+      if field.missing then
+        local msg = string.format(msg, tltype.tostring(tself), tltype.tostring(field[1]))
+        typeerror(env, "self", msg, pos)  
+      end
+  end
+end
+
+local function check_constructor (env, idlist, body, tself, pos)
+  local oself = env.self
+  env.self = nil
+  tlst.begin_function(env)
+  tlst.set_in_constructor(env)
+  tlst.begin_scope(env)  
+  local input_type = check_parameters(env, idlist, true, idlist.pos)
+  local output_type = tltype.Tuple({ Nil }, true)
+  local t = tltype.Function(input_type,output_type)
+  local len = #idlist
+  if len > 0 and idlist[len].tag == "Dots" then len = len - 1 end
+  for k = 1,len do
+    local v = idlist[k]
+    v[2] = replace_names(env, v[2], v.pos)
+    set_type(v, v[2])
+    check_masking(env, v[1], v.pos)
+    tlst.set_local(env,v)
+  end
+  check_masking(env,"self",pos)
+  tlst.set_local(env, { tag = "Id", pos = pos, [1] = "self", ["type"] = tself})
+  local r = check_block(env,body)
+  if not r then tlst.set_return_type(env, tltype.Tuple({ Nil }, true)) end
+  check_unused_locals(env)
+  check_constructor_self(env, tself, texpectedself)
+  tlst.end_scope(env)
+  tlst.end_function(env)
+  env.self = oself
+end
+
+local function check_method (env, idlist, tret, body, tself, pos)
+  local oself = env.self
+  env.self = tself
+  tlst.begin_function(env)
+  tlst.begin_scope(env)  
+  local input_type = check_parameters(env, idlist, true, idlist.pos)
+  local output_type = replace_names(env,tret,tret.pos)
+  local t = tltype.Function(input_type,output_type)
+  local len = #idlist
+  if len > 0 and idlist[len].tag == "Dots" then len = len - 1 end
+  for k = 1,len do
+    local v = idlist[k]
+    v[2] = replace_names(env, v[2], v.pos)
+    set_type(v, v[2])
+    check_masking(env, v[1], v.pos)
+    tlst.set_local(env,v)
+  end
+  check_masking(env,"self",pos)
+  tlst.set_local(env, { tag = "Id", pos = pos, [1] = "self", ["type"] = Self})
+  local r = check_block(env,body)
+  if not r then tlst.set_return_type(env, tltype.Tuple({ Nil }, true)) end
+  check_unused_locals(env)
+  tlst.end_scope(env)
+  local inferred_type = infer_return_type(env)
+  check_return_type(env, inferred_type, tret, pos)
+  tlst.end_function(env)
+  env.self = oself
+end
+
+local function check_class (env, stm)
+  local name, isAbstract, elems = stm[1], stm[2], stm[3]
+  if tlst.get_interface(env, name) then
+    local msg = "attempt to redeclare type '%s'"
+    msg = string.format(msg, name)
+    typeerror(env, "alias", msg, stm.pos)
+  else
+    local constructors, methods, fields = get_elem_types(env, elems)
+    
+    --TODO: handle inheritance
+    
+    --all instance elements, both fields and methods
+    local instance_elements = {}
+    --instance fields only
+    local instance_fields = {}
+    for k,v in pairs(methods) do 
+      instance_elements[#instance_elements+1] = tltype.Field(true,tltype.Literal(k),v) 
+    end
+    for k,v in pairs(fields) do 
+      --TODO: allow const qualifiers before field definitions
+      --for now, they are non-const by default
+      instance_elements[#instance_elements+1] = tltype.Field(false,tltype.Literal(k),v)
+      instance_fields[#instance_fields+1] = tltype.Field(false,tltype.Literal(k),v) 
+    end
+    local t_instance = tltype.Table(table.unpack(instance_elements))
+    t_instance.fixed = true
+    
+    for _,elem in ipairs(elems) do
+      if elem.tag == "ConcreteClassMethod" then
+        local name,parlist,tret,body = elem[1], elem[2], elem[3], elem[4]
+        check_method(env,parlist,tret,body,t_instance,elem.pos)
+      elseif elem.tag == "ClassConstructor" then
+        local name, parlist, body = elem[1], elem[2], elem[3]
+        --TODO: the self constructor type should contain inherited fields if super is called
+        local t_self_init = tltype.Table(table.unpack(instance_fields))
+        for _,field in ipairs(t_self_init) do
+          field.missing = true
+        end
+        t_self_init.closed = true
+        check_constructor(env, parlist, body, t_self_init, pos)
+      elseif elem.tag == "ClassFinalizer" then
+      
+      end
+    end
+    
+    --add t_instance to interface environment
+  end
 end
 
 local function check_table (env, exp)
