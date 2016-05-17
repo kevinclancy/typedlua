@@ -770,7 +770,7 @@ local function get_elem_types (env, elems)
       elseif elem.tag == "ConcreteClassMethod" then
         local name,parlist,tret = elem[1][1],elem[2],elem[3]
         check_redecl(name,elem.pos)         
-        local t1 = check_parameters(env, parlist, true, elem.pos)
+        local t1 = check_parameters(env, parlist, false, elem.pos)
         local t2 = tret
         methods[name] = tltype.Function(t1, t2, true)
       elseif elem.tag == "AbstractClassMethod" then
@@ -861,7 +861,7 @@ local function check_method (env, idlist, tret, body, tself, pos)
 end
 
 local function check_class (env, stm)
-  local name, isAbstract, elems = stm[1], stm[2], stm[3]
+  local name, isAbstract, elems, is_local = stm[1], stm[2], stm[3], stm.is_local
   if tlst.get_interface(env, name) then
     local msg = "attempt to redeclare type '%s'"
     msg = string.format(msg, name)
@@ -875,17 +875,23 @@ local function check_class (env, stm)
     local instance_elements = {}
     --instance fields only
     local instance_fields = {}
-    for k,v in pairs(methods) do 
-      instance_elements[#instance_elements+1] = tltype.Field(true,tltype.Literal(k),v) 
+    --instance methods only
+    local instance_methods = {}
+    for k,v in pairs(methods) do
+      local newelem = tltype.Field(true, tltype.Literal(k), v) 
+      instance_elements[#instance_elements+1] = newelem
+      instance_methods[#instance_methods+1] = newelem
     end
     for k,v in pairs(fields) do 
+        local newelem = tltype.Field(false, tltype.Literal(k), v) 
       --TODO: allow const qualifiers before field definitions
       --for now, they are non-const by default
-      instance_elements[#instance_elements+1] = tltype.Field(false,tltype.Literal(k),v)
-      instance_fields[#instance_fields+1] = tltype.Field(false,tltype.Literal(k),v) 
+      instance_elements[#instance_elements+1] = newelem
+      instance_fields[#instance_fields+1] = newelem
     end
     local t_instance = tltype.Table(table.unpack(instance_elements))
     t_instance.fixed = true
+    t_instance.name = name
     
     for _,elem in ipairs(elems) do
       if elem.tag == "ConcreteClassMethod" then
@@ -905,7 +911,27 @@ local function check_class (env, stm)
       end
     end
     
-    --add t_instance to interface environment
+    local class_constructors = {}
+    for k,v in pairs(constructors) do
+      --overwrite constructor return value with instance type
+      v[2] = t_instance
+      class_constructors[#class_constructors + 1] = tltype.Field(true, tltype.Literal(k), v)
+    end
+  
+    local t_methods = tltype.Table(table.unpack(instance_methods))
+    local t_class = tltype.Table(table.unpack(class_constructors))
+    t_class[#t_class + 1] = tltype.Field(true, tltype.Literal("__methods"), t_methods)
+    
+    tlst.set_interface(env, name, t_class, is_local)
+    
+    if is_local then
+      t_instance.name = name
+      set_type(name, t_class)
+      check_masking(env, name[1], name.pos)
+      tlst.set_local(env, name)
+    else
+    end
+    
   end
 end
 
@@ -1136,7 +1162,7 @@ local function check_invoke (env, exp)
   check_exp(env, exp1)
   check_exp(env, exp2)
   check_explist(env, explist)
-  table.insert(explist, 1, { type = Self })
+  table.insert(explist, 1, { type = Any })
   local t1, t2 = get_type(exp1), get_type(exp2)
   t1 = replace_self(env, t1, env.self)
   if tltype.isTable(t1) or
@@ -1671,15 +1697,16 @@ local function check_index (env, exp)
   local msg = "attempt to index '%s' with '%s'"
   t1 = replace_self(env, t1, env.self)
   if tltype.isTable(t1) then
-    local field = tltype.getFieldTable(t2,t1)
     -- FIX: methods should not leave objects, this is unsafe!
     local field_type = replace_self(env, tltype.getField(t2, t1), tltype.Any())
-    if field.missing then 
-      msg = "attempt to access missing field %s"
-      msg = string.format(msg, tltype.tostring(t2))
-      typeerror(env, "index", msg, exp.pos)
-      set_type(exp, Nil)
-    elseif not tltype.isNil(field_type) then
+    if not tltype.isNil(field_type) then
+      local field = tltype.getFieldTable(t2,t1)
+      if field.missing then
+        msg = "attempt to access missing field %s"
+        msg = string.format(msg, tltype.tostring(t2))
+        typeerror(env, "index", msg, exp.pos)
+        set_type(exp, Nil)      
+      end
       set_type(exp, field_type)
     else
       if exp1.tag == "Id" and exp1[1] == "_ENV" and exp2.tag == "String" then

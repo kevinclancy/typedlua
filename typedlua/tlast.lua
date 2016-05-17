@@ -234,6 +234,12 @@ function tlast.statLocalTypeDec (stat)
   return stat
 end
 
+-- statLocalTypeDec : (stat) -> (stat)
+function tlast.statLocalClassDec (stat)
+  stat.is_local = true
+  return stat
+end
+
 --classElementConcreteField : (pos,name,ty) -> (classElement)
 function tlast.classElementConcreteField(pos,name,ty)
   return { tag = "ConcreteClassField", pos = pos, [1] = name, [2] = ty }

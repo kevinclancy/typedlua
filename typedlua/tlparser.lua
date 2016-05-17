@@ -310,7 +310,7 @@ local G = lpeg.P { "TypedLua";
   LocalAssign = lpeg.Cp() * lpeg.V("NameList") *
                 ((tllexer.symb("=") * lpeg.V("ExpList")) + lpeg.Ct(lpeg.Cc())) / tlast.statLocal;
   LocalStat = tllexer.kw("local") *
-              (lpeg.V("LocalTypeDec") + lpeg.V("LocalFunc") + lpeg.V("LocalAssign"));
+              (lpeg.V("LocalTypeDec") + lpeg.V("LocalClassDec") + lpeg.V("LocalFunc") + lpeg.V("LocalAssign"));
   LabelStat = lpeg.Cp() * tllexer.symb("::") * tllexer.token(tllexer.Name, "Name") * tllexer.symb("::") / tlast.statLabel;
   BreakStat = lpeg.Cp() * tllexer.kw("break") / tlast.statBreak;
   GoToStat = lpeg.Cp() * tllexer.kw("goto") * tllexer.token(tllexer.Name, "Name") / tlast.statGoto;
@@ -319,6 +319,7 @@ local G = lpeg.P { "TypedLua";
             tllexer.symb(";")^-1 / tlast.statReturn;
   TypeDecStat = lpeg.V("Interface");
   LocalTypeDec = lpeg.V("TypeDecStat") / tlast.statLocalTypeDec;
+  LocalClassDec = lpeg.V("ClassDecStat") / tlast.statLocalClassDec;
   LVar = (tllexer.kw("const") * lpeg.V("SuffixedExp") / tlast.setConst) +
          lpeg.V("SuffixedExp");
   ExprStat = lpeg.Cmt(

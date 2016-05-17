@@ -107,6 +107,31 @@ local function code_parlist (parlist, fmt)
   return table.concat(l, ", ")
 end
 
+local function code_class (class, fmt)
+  --return { tag = "Class", pos = pos, [1] = name, [2] = isAbstract, [3] = elems } 
+  local islocal, class_name, class_abstract, elems = class.is_local, class[1][1], class[2], class[3]
+  local str = ""
+  if islocal then
+    str = str .. "local "
+  end
+  str = indent(str .. class_name .. " = { __methods = {} } ", fmt)
+  fmt.line = fmt.line + 1
+  for _,elem in ipairs(elems) do
+    if elem.tag == "ClassConstructor" then
+      local cons_name, parlist, body = elem[1][1], elem[2], elem[3]
+      str = str .. " function " .. class_name .. "." .. cons_name .. "(" .. code_parlist(parlist,fmt) .. ")"
+      str = indent(str .. "local self = setmetatable({}, { __index = " .. class_name .. ".__methods })",fmt) 
+      str = str .. code_block(body, fmt)
+      str = str .. indent("return self end",fmt)
+    elseif elem.tag == "ConcreteClassMethod" then
+      local method_name, parlist, tret, body = elem[1][1], elem[2], elem[3], elem[4]
+      str = indent(str .. " function " .. class_name .. ".__methods:" .. method_name .. "(" .. code_parlist(parlist,fmt) .. ")",fmt)
+      str = str .. code_block(body,fmt) .. indent("end",fmt)
+    end
+  end
+  return str
+end
+
 local function is_simple_key (key)
   return key.tag == "String" and key[1]:match("^[a-zA-Z_][a-zA-Z0-9_]*$")
 end
@@ -310,8 +335,7 @@ function code_stm (stm, fmt)
   elseif tag == "Interface" then
     return ""
   elseif tag == "Class" then
-    --TODO: generate actual code
-    return ""
+    return indent(code_class(stm,fmt), fmt)
   else
     error("tyring to generate code for a statement, but got " .. tag)
   end
