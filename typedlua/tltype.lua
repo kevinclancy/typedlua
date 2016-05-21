@@ -461,7 +461,7 @@ function tltype.getFieldTable(k,t)
       return v
     end
   end
-  error("BUG: tried to get a field that does not exist")
+  return nil
 end
 
 -- fieldlist : ({ident}, type) -> (field*)
@@ -1000,6 +1000,10 @@ end
 
 function tltype.consistent_subtype (t1, t2)
   return subtype({}, t1, t2, "<~")
+end
+
+function tltype.consistent (t1, t2)
+  return tltype.consistent_subtype(t1, t2) and tltype.consistent_subtype(t2,t1)
 end
 
 -- most general type

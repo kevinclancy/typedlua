@@ -860,36 +860,273 @@ local function check_method (env, idlist, tret, body, tself, pos)
   env.self = oself
 end
 
+local function check_premethod_ty(env,premethod,pos)
+  local t1, t2 = premethod[1], premethod[2]
+  if not tltype.isStr(t1) then
+    local msg = "All fields of the __premethods table should have literal string keys. %s is not a literal string."
+    msg = string.format(msg, tltype.tostring(t1))
+    typeerror(env, "inheritance", msg, pos)
+    return false
+  elseif not method.const then
+     local msg = "All fields of the __premethods table should be const, but %s is not."
+     msg = string.format(msg, tltype.tostring(t1))
+     typeerror(env, "inheritance", msg, pos)
+     return false
+  elseif not tltype.isFunction(t2) then
+    local msg = "All fields of the __premethods table should be functions, but %s is a %s."
+    msg = string.format(msg, tltype.tostring(t1), tltype.tostring(t2))
+    typeerror(env, "inheritance", msg, pos)
+    return false
+  elseif not tltype.isTuple(t2[1]) then
+    local msg = "Premethod input type should be a tuple, but %s has input type %2."
+    msg = string.format(msg, tltype.tostring(t1), tltype.tostring(t2[1]))
+    typeerror(env, "inheritance", msg, pos)
+    return false
+  elseif not tltype.isTable(t2[1][1]) then
+    local msg = "The first formal argument to a premethod should be a table, but %s has argument type %s."
+    msg = string.format(msg, tltype.tostring(t1), tltype.tostring(t2[1][1]))
+    typeerror(env, "inheritance", msg, pos)
+    return false
+  end
+  return true 
+end
+
+
+local function method_from_premethod(premethod)
+  assert(premethod.const)
+  
+  local tkey = premethod[1]
+  local tvalue = premethod[2]
+  local tinput = tvalue[1]
+  local toutput = tvalue[2]
+  
+  local new_tinput = {}
+  for k,v in pairs(tinput) do new_tinput[k] = v end
+  new_tinput[1] = Self
+  
+  local new_function = tltype.Function(new_tinput,toutput)
+  
+  return tltype.Field(true, premethod[1], new_function)
+end
+
+local function check_premethods_table(env,premethods,tinstance,constructor_name,tclass,pos)
+  if not tltype.isTable(premethods) then
+    local msg = "The __premethods field of a superclass type should be a table, but %s has a __premethods field of type %s"
+    msg = string.format(msg, tltype.tostring(tclass), tltype.tostring(premethods))
+    typeerror(env, "inheritance", msg, pos)
+    return false            
+  else
+    --c
+    for _,premethod in ipairs(premethods) do
+      local well_formed = check_premethod_t(env,premethod,pos)
+      if well_formed then
+        local name = tltype.tostring(premethod[1])
+        local tval = premethod[2]
+        local tinput_tuple = tval[1]
+        local premethod_tinstance = tinput_tuple[1]
+        
+        --check that premethod's first argument is consistent with tinstance
+        if not tltype.consistent(tinstance,premethod_tinstance) then
+          local msg = "premethod %s has a first argument type %s that is not consistent with the return type %s of constructor %s."
+          local s1,s2 = name, tltype.tostring(premethod_tinstance)
+          local s3,s4 = tltype.tostring(tinstance), constructor_name
+          msg = string.format(msg,s1,s2,s3,s4)
+          typeerror(env, "inheritance", msg, pos)
+          return false        
+        end
+        
+        --check that tinstance has a method corresponding to premethod
+        assert(tltype.isTable(tinstance))
+        local tmethod = tltype.getField(premethod[1],tinstance)
+        if not tmethod then
+          local msg = "return type of constructor %s (assumed to be the class instance type)"
+          msg = msg .. "does not have a method corresponding to premethod %s."
+          msg = string.format(msg,constructor_name,tltype.tostring(premethod[1]))
+          typeerror(env, "inheritance", msg, pos)
+          return false
+        elseif not tltype.consistent(method_from_premethod(tval),tmethod) then
+          local msg = "type %s of method %s not consistent with premethod type %s"
+          msg = string.format(msg, tltype.tostring(tmethod), name, tltype.tostring(tval))
+          typeerror(env, "inheritance", msg, pos)
+          tinput_tuple[1] = premethod_tinstance
+          return false
+        end
+      end
+    end
+  end
+  
+  local members = {}
+  local methods = {}
+  local fields = {}
+  for _,field in ipairs(tinstance) do
+    local premethod = tltype.getFieldTable(field[1],premethods)
+    local fieldname = tltype.tostring(field[1])
+    if premethod then
+      methods[fieldname] = method_of_premethod(premethod)
+    else
+      members[fieldname] = field
+    end
+    fields[fieldname] = field
+  end
+  
+  return true, members, methods, fields
+end
+
+
+--checks that t is a valid class type
+local function class_check_tclass(env,t,pos)
+  --this will be replaced with an instance type if one is found
+  local tinstance = nil
+  local tinstance_src_key = nil
+  
+  if not tltype.isTable(t) then
+    local msg = "attempt to inherit from non-table %s"
+    msg = string.format(msg, tltype.toString(t))
+    typeerror(env, "inheritance", msg, pos)
+    return false
+  elseif not tparent.Fixed then
+    local msg = "attempt to inherit from non-fixed table %s"
+    msg = string.format(msg, tltype.toString(t))
+    typeerror(env, "inheritance", msg,  pos)
+    return false
+  elseif not tltype.getField("__premethods") then
+    local msg = "attempt to inherit from table %s which has no __premethods field"
+    msg = string.format(msg, tltype.toString(t))
+    typeerror(env, "inheritance", msg, pos)
+    return false
+  elseif not #tparent > 1 then
+    local msg = "attempt to inherit from table %s with no constructor"
+    msg = string.format(msg, tltype.toString(tparent))
+    typeerror(env, "inheritance", msg, pos)
+    return false
+  else
+    for _,field in ipairs(t) do
+      local tkey,tval = field[1], field[2]
+      if tkey.tag ~= "TLiteral" then
+        local msg = "Parent %s has key type %s, but inheritance is only allowed from tables with only literal string keys."
+        msg = string.format(msg, tltype.tostring(t), tltype.tostring(tkey))
+        typeerror(env, "inheritance", msg, pos)
+        return false
+      elseif type(tkey[1]) ~= "string" then
+        local msg = "Parent %s has key type %s, but inheritance is only allowed from tables with only literal string keys."
+        msg = string.format(msg, tltype.tostring(t), tltype.tostring(tkey))
+        typeerror(env, "inheritance", msg, pos)
+        return false
+      elseif not field.const then
+        local msg = "Field %s of %s is non-const, but superclass types may only contain non-const fields."
+        msg = string.format(msg, tltype.tostring(tkey), tltype.tostring(tparent))
+        typeerror(env, "inheritance", msg, pos)
+        return false
+      elseif tkey.name == "__premethods" then
+        --we are processing constructors now. we will with premethods afterward.
+      elseif not tltype.isFunction(tval) then
+        local msg = "All fields of a class type except __methods should be functions, but %s has type %s"
+        msg = string.format(msg, tltype.tostring(tkey), tltype.tostring(tval))
+        typeerror(env, "inheritance", msg, pos)
+        return false      
+      else 
+        local tret = tltype.unfold(tval[2][1])
+        if not tltype.isTable(tval[2][1]) or tltype.isAny(tval[2][1]) then
+          local msg = "Constructors should return tables, but %s returns a %s" -- these actually might be recursive types
+          msg = string.format(msg, tltype.tostring(tkey), tltype.tostring(tval[2][1]))
+          typeerror(env, "inheritance", msg, pos)
+          return false          
+        else
+          local tret = tval[2][1]
+          --this is a constructor. We need to take the result type as the instance type
+          if tinstance == nil then
+            --make sure it has one return value which is a table type.
+            tinstance = tret
+            tinstance_src_key = tkey 
+          else
+            if not tltype.consistent(tinstance,tret) then
+              local msg = "Return type %s of constructor %s not consistent with return type %s of constructor %s"
+              local inst_str, inst_key = tltype.tostring(tinstance), tltype.tostring(tinstance_src_key)
+              local ret_str, ret_key = tltype.tostring(tret), tltype.tostring(tkey)
+              msg = string.format(msg, inst_str, inst_key, ret_str, ret_key)
+              typeerror(env, "inheritance", msg, pos)
+              return false                      
+            end
+          end
+        end
+      end
+    end
+    
+    assert(tinstance ~= nil)
+    local premethods_table = tltype.getFieldTable("__premethods", t)
+    local succ, mems, methods, fields = check_premethods_table(env,premethods_table, tinstance, tltype.tostring(tinstance_src_key), t, pos)
+    return succ, mems, methods, fields
+  end
+  assert(false)
+end
+
 local function check_class (env, stm)
-  local name, isAbstract, elems, is_local = stm[1], stm[2], stm[3], stm.is_local
+  local name, isAbstract, elems, parent, is_local = stm[1], stm[2], stm[3], stm[4], stm.is_local
   if tlst.get_interface(env, name) then
     local msg = "attempt to redeclare type '%s'"
     msg = string.format(msg, name)
     typeerror(env, "alias", msg, stm.pos)
   else
-    local constructors, methods, fields = get_elem_types(env, elems)
+    local constructors, methods, members = get_elem_types(env, elems)
     
-    --TODO: handle inheritance
+    local parent_methods = {}
+    local parent_fields = {}
+    local parent_members = {}
+    --handle inheritance
+    if parent ~= "NoParent" then
+      assert(parent.tag == "Id")
+      check_id(parent)
+      local tparent = get_type(parent)
+      local success,members,methods,fields = class_check_tclass(env, tparent, parent.pos)
+      if success then
+        parent_methods = methods
+        parent_fields = fields
+        parent_members = members
+      else
+        return false
+      end
+    end
     
-    --all instance elements, both fields and methods
-    local instance_elements = {}
-    --instance fields only
+    --all instance fields, both members and methods
     local instance_fields = {}
+    --instance fields only
+    local instance_members = {}
     --instance methods only
     local instance_methods = {}
+    
     for k,v in pairs(methods) do
-      local newelem = tltype.Field(true, tltype.Literal(k), v) 
-      instance_elements[#instance_elements+1] = newelem
-      instance_methods[#instance_methods+1] = newelem
+      local parent_method = parent_methods[k]
+      if parent_method then
+        if not tltype.consistent_subtype(v[2],parent_method[2]) then
+          local msg = "Method %s overridden with type %s which is not a consistent-subtype of %s"
+          msg = string.format(msg, k, tltype.tostring(v[2]), tltype.tostring(parent_method[2]))
+          typeerror(env, "inheritance", msg, stm.pos)
+          return false
+        end
+        
+        local newelem = tltype.Field(true, tltype.Literal(k), parent_method) 
+        instance_fields[#instance_fields+1] = parent_method
+        instance_methods[#instance_methods+1] = parent_method
+      else
+        local newelem = tltype.Field(true, tltype.Literal(k), v) 
+        instance_fields[#instance_fields+1] = newelem
+        instance_methods[#instance_methods+1] = newelem
+      end
     end
-    for k,v in pairs(fields) do 
-        local newelem = tltype.Field(false, tltype.Literal(k), v) 
-      --TODO: allow const qualifiers before field definitions
-      --for now, they are non-const by default
-      instance_elements[#instance_elements+1] = newelem
+    
+    for k,v in pairs(members) do 
+      if parent_members[k] then
+        local msg = "member %s declared twice: once in class %s and once in class %s"
+        msg = string.format(msg, k, parent[1], name[1])
+        typeerror(env, "inheritance", msg, v.pos)
+        return false
+      end
+      
+      local newelem = tltype.Field(false, tltype.Literal(k), v) 
       instance_fields[#instance_fields+1] = newelem
+      instance_members[#instance_members+1] = newelem
     end
-    local t_instance = tltype.Table(table.unpack(instance_elements))
+    local t_instance = tltype.Table(table.unpack(instance_fields))
     t_instance.fixed = true
     t_instance.name = name
     
@@ -900,7 +1137,7 @@ local function check_class (env, stm)
       elseif elem.tag == "ClassConstructor" then
         local name, parlist, body = elem[1], elem[2], elem[3]
         --TODO: the self constructor type should contain inherited fields if super is called
-        local t_self_init = tltype.Table(table.unpack(instance_fields))
+        local t_self_init = tltype.Table(table.unpack(instance_members))
         for _,field in ipairs(t_self_init) do
           field.missing = true
         end

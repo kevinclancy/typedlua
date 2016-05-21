@@ -217,9 +217,9 @@ function tlast.statInterface (pos, name, t)
   return { tag = "Interface", pos = pos, [1] = name, [2] = t }
 end
 
---statClass : (number, string, boolean, class_element_array) -> (stat)
-function tlast.statClass(pos,isAbstract,name,elems)
-  return { tag = "Class", pos = pos, [1] = name, [2] = isAbstract, [3] = elems } 
+--statClass : (number, string, boolean, class|"NoParent", class_element_array) -> (stat)
+function tlast.statClass(pos,isAbstract,name,superclass,elems)
+  return { tag = "Class", pos = pos, [1] = name, [2] = isAbstract, [3] = elems, [4] = superclass } 
 end
 
 -- statUserdata : (number, string, type) -> (stat)

@@ -176,7 +176,7 @@ local G = lpeg.P { "TypedLua";
              
   ClassDecStat = lpeg.Cp() * 
                  (tllexer.kw("abstract") * lpeg.Cc(true) + lpeg.Cc(false)) * 
-                 tllexer.kw("class") * lpeg.V("Id") * 
+                 tllexer.kw("class") * lpeg.V("Id") * (tllexer.kw("extends") * lpeg.V("Id") + lpeg.Cc("NoParent")) *
                  lpeg.Ct(lpeg.V("ClassElement")^0) * tllexer.kw("end") / tlast.statClass;
              
   -- parser
