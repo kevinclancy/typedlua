@@ -114,13 +114,13 @@ local function code_class (class, fmt)
   if islocal then
     str = str .. "local "
   end
-  str = indent(str .. class_name .. " = { __methods = {} } ", fmt)
+  str = indent(str .. class_name .. " = { __premethods = {} } ", fmt)
   fmt.line = fmt.line + 1
   for _,elem in ipairs(elems) do
     if elem.tag == "ClassConstructor" then
       local cons_name, parlist, body = elem[1][1], elem[2], elem[3]
       str = str .. " function " .. class_name .. "." .. cons_name .. "(" .. code_parlist(parlist,fmt) .. ")"
-      str = indent(str .. "local self = setmetatable({}, { __index = " .. class_name .. ".__methods })",fmt) 
+      str = indent(str .. "local self = setmetatable({}, { __index = " .. class_name .. ".__premethods })",fmt) 
       str = str .. code_block(body, fmt)
       str = str .. indent("return self end",fmt)
     elseif elem.tag == "ConcreteClassMethod" then

@@ -23,7 +23,7 @@ local Number = tltype.Number()
 local String = tltype.String()
 local Integer = tltype.Integer(false)
 
-local check_block, check_stm, check_exp, check_var
+local check_block, check_stm, check_exp, check_var, check_id
 
 local function lineno (s, i)
   if i == 1 then return 1, 1 end
@@ -832,8 +832,6 @@ local function check_constructor (env, idlist, body, tself, pos)
 end
 
 local function check_method (env, idlist, tret, body, tself, pos)
-  local oself = env.self
-  env.self = tself
   tlst.begin_function(env)
   tlst.begin_scope(env)  
   local input_type = check_parameters(env, idlist, true, idlist.pos)
@@ -849,7 +847,7 @@ local function check_method (env, idlist, tret, body, tself, pos)
     tlst.set_local(env,v)
   end
   check_masking(env,"self",pos)
-  tlst.set_local(env, { tag = "Id", pos = pos, [1] = "self", ["type"] = Self})
+  tlst.set_local(env, { tag = "Id", pos = pos, [1] = "self", ["type"] = tself})
   local r = check_block(env,body)
   if not r then tlst.set_return_type(env, tltype.Tuple({ Nil }, true)) end
   check_unused_locals(env)
@@ -857,17 +855,16 @@ local function check_method (env, idlist, tret, body, tself, pos)
   local inferred_type = infer_return_type(env)
   check_return_type(env, inferred_type, tret, pos)
   tlst.end_function(env)
-  env.self = oself
 end
 
-local function check_premethod_ty(env,premethod,pos)
+local function check_premethod_t(env,premethod,pos)
   local t1, t2 = premethod[1], premethod[2]
   if not tltype.isStr(t1) then
     local msg = "All fields of the __premethods table should have literal string keys. %s is not a literal string."
     msg = string.format(msg, tltype.tostring(t1))
     typeerror(env, "inheritance", msg, pos)
     return false
-  elseif not method.const then
+  elseif not premethod.const then
      local msg = "All fields of the __premethods table should be const, but %s is not."
      msg = string.format(msg, tltype.tostring(t1))
      typeerror(env, "inheritance", msg, pos)
@@ -889,6 +886,25 @@ local function check_premethod_ty(env,premethod,pos)
     return false
   end
   return true 
+end
+
+local function premethod_from_method(method, tinstance)
+  assert(method.const)
+  
+  local tkey = method[1]
+  local tvalue = method[2]
+  local tinput = tvalue[1]
+  local toutput = tvalue[2]
+  
+  assert(tltype.isSelf(tinput[1]))
+  
+  local new_tinput = {}
+  for k,v in pairs(tinput) do new_tinput[k] = v end
+  new_tinput[1] = tinstance
+  
+  local new_function = tltype.Function(new_tinput,toutput)
+  
+  return tltype.Field(true, method[1], new_function)  
 end
 
 
@@ -920,10 +936,10 @@ local function check_premethods_table(env,premethods,tinstance,constructor_name,
     for _,premethod in ipairs(premethods) do
       local well_formed = check_premethod_t(env,premethod,pos)
       if well_formed then
+        -- the name of the current premethod
         local name = tltype.tostring(premethod[1])
-        local tval = premethod[2]
-        local tinput_tuple = tval[1]
-        local premethod_tinstance = tinput_tuple[1]
+        -- the first formal parameter type from the current premethod
+        local premethod_tinstance = premethod[2][1][1]
         
         --check that premethod's first argument is consistent with tinstance
         if not tltype.consistent(tinstance,premethod_tinstance) then
@@ -937,6 +953,8 @@ local function check_premethods_table(env,premethods,tinstance,constructor_name,
         
         --check that tinstance has a method corresponding to premethod
         assert(tltype.isTable(tinstance))
+        --we expect the corresponding method of the instance type to be consistent with ttarget
+        local ttarget = method_from_premethod(premethod)[2]
         local tmethod = tltype.getField(premethod[1],tinstance)
         if not tmethod then
           local msg = "return type of constructor %s (assumed to be the class instance type)"
@@ -944,11 +962,10 @@ local function check_premethods_table(env,premethods,tinstance,constructor_name,
           msg = string.format(msg,constructor_name,tltype.tostring(premethod[1]))
           typeerror(env, "inheritance", msg, pos)
           return false
-        elseif not tltype.consistent(method_from_premethod(tval),tmethod) then
+        elseif not tltype.consistent(ttarget,tmethod) then
           local msg = "type %s of method %s not consistent with premethod type %s"
-          msg = string.format(msg, tltype.tostring(tmethod), name, tltype.tostring(tval))
+          msg = string.format(msg, tltype.tostring(tmethod), name, tltype.tostring(ttarget))
           typeerror(env, "inheritance", msg, pos)
-          tinput_tuple[1] = premethod_tinstance
           return false
         end
       end
@@ -962,7 +979,7 @@ local function check_premethods_table(env,premethods,tinstance,constructor_name,
     local premethod = tltype.getFieldTable(field[1],premethods)
     local fieldname = tltype.tostring(field[1])
     if premethod then
-      methods[fieldname] = method_of_premethod(premethod)
+      methods[fieldname] = premethod
     else
       members[fieldname] = field
     end
@@ -984,19 +1001,19 @@ local function class_check_tclass(env,t,pos)
     msg = string.format(msg, tltype.toString(t))
     typeerror(env, "inheritance", msg, pos)
     return false
-  elseif not tparent.Fixed then
+  elseif not t.fixed then
     local msg = "attempt to inherit from non-fixed table %s"
-    msg = string.format(msg, tltype.toString(t))
+    msg = string.format(msg, tltype.tostring(t))
     typeerror(env, "inheritance", msg,  pos)
     return false
-  elseif not tltype.getField("__premethods") then
+  elseif not tltype.getField(tltype.Literal("__premethods"),t) then
     local msg = "attempt to inherit from table %s which has no __premethods field"
     msg = string.format(msg, tltype.toString(t))
     typeerror(env, "inheritance", msg, pos)
     return false
-  elseif not #tparent > 1 then
+  elseif not (#t > 1) then
     local msg = "attempt to inherit from table %s with no constructor"
-    msg = string.format(msg, tltype.toString(tparent))
+    msg = string.format(msg, tltype.tostring(tparent))
     typeerror(env, "inheritance", msg, pos)
     return false
   else
@@ -1020,19 +1037,18 @@ local function class_check_tclass(env,t,pos)
       elseif tkey.name == "__premethods" then
         --we are processing constructors now. we will with premethods afterward.
       elseif not tltype.isFunction(tval) then
-        local msg = "All fields of a class type except __methods should be functions, but %s has type %s"
+        local msg = "All fields of a class type except __premethods should be functions, but %s has type %s"
         msg = string.format(msg, tltype.tostring(tkey), tltype.tostring(tval))
         typeerror(env, "inheritance", msg, pos)
         return false      
       else 
-        local tret = tltype.unfold(tval[2][1])
-        if not tltype.isTable(tval[2][1]) or tltype.isAny(tval[2][1]) then
+        local tret = tltype.unfold(tval[2])
+        if not tltype.isTable(tret) or tltype.isAny(tret) then
           local msg = "Constructors should return tables, but %s returns a %s" -- these actually might be recursive types
           msg = string.format(msg, tltype.tostring(tkey), tltype.tostring(tval[2][1]))
           typeerror(env, "inheritance", msg, pos)
           return false          
         else
-          local tret = tval[2][1]
           --this is a constructor. We need to take the result type as the instance type
           if tinstance == nil then
             --make sure it has one return value which is a table type.
@@ -1053,7 +1069,7 @@ local function class_check_tclass(env,t,pos)
     end
     
     assert(tinstance ~= nil)
-    local premethods_table = tltype.getFieldTable("__premethods", t)
+    local premethods_table = tltype.getField(tltype.Literal("__premethods"), t)
     local succ, mems, methods, fields = check_premethods_table(env,premethods_table, tinstance, tltype.tostring(tinstance_src_key), t, pos)
     return succ, mems, methods, fields
   end
@@ -1075,7 +1091,7 @@ local function check_class (env, stm)
     --handle inheritance
     if parent ~= "NoParent" then
       assert(parent.tag == "Id")
-      check_id(parent)
+      check_id(env, parent)
       local tparent = get_type(parent)
       local success,members,methods,fields = class_check_tclass(env, tparent, parent.pos)
       if success then
@@ -1095,22 +1111,26 @@ local function check_class (env, stm)
     local instance_methods = {}
     
     for k,v in pairs(methods) do
-      local parent_method = parent_methods[k]
-      if parent_method then
-        if not tltype.consistent_subtype(v[2],parent_method[2]) then
-          local msg = "Method %s overridden with type %s which is not a consistent-subtype of %s"
-          msg = string.format(msg, k, tltype.tostring(v[2]), tltype.tostring(parent_method[2]))
+      local parent_premethod = parent_methods[k]
+      if parent_premethod then
+        local parent_method = method_from_premethod(parent_premethod)
+        if not tltype.consistent_subtype(v,parent_method[2]) then
+          local msg = "method %s overridden with type %s, which is not a consistent-subtype of %s"
+          msg = string.format(msg, k, tltype.tostring(v), tltype.tostring(parent_method[2]))
           typeerror(env, "inheritance", msg, stm.pos)
           return false
         end
-        
-        local newelem = tltype.Field(true, tltype.Literal(k), parent_method) 
-        instance_fields[#instance_fields+1] = parent_method
-        instance_methods[#instance_methods+1] = parent_method
-      else
-        local newelem = tltype.Field(true, tltype.Literal(k), v) 
-        instance_fields[#instance_fields+1] = newelem
-        instance_methods[#instance_methods+1] = newelem
+      end
+      
+      local newelem = tltype.Field(true, tltype.Literal(k), v) 
+      instance_fields[#instance_fields+1] = newelem
+      instance_methods[#instance_methods+1] = newelem    
+    end
+    
+    for k,v in pairs(parent_methods) do
+      if not methods[k] then --don't add overridden methods
+        instance_fields[#instance_fields+1] = method_from_premethod(v)
+        instance_methods[#instance_methods+1] = method_from_premethod(v)
       end
     end
     
@@ -1126,6 +1146,12 @@ local function check_class (env, stm)
       instance_fields[#instance_fields+1] = newelem
       instance_members[#instance_members+1] = newelem
     end
+    
+     for k,v in pairs(parent_members) do
+      instance_fields[#instance_fields+1] = v
+      instance_members[#instance_members+1] = v
+    end   
+    
     local t_instance = tltype.Table(table.unpack(instance_fields))
     t_instance.fixed = true
     t_instance.name = name
@@ -1156,13 +1182,14 @@ local function check_class (env, stm)
     end
   
     local t_methods = tltype.Table(table.unpack(instance_methods))
+    for i,field in ipairs(t_methods) do t_methods[i] = premethod_from_method(field,t_instance) end
     local t_class = tltype.Table(table.unpack(class_constructors))
-    t_class[#t_class + 1] = tltype.Field(true, tltype.Literal("__methods"), t_methods)
+    t_class[#t_class + 1] = tltype.Field(true, tltype.Literal("__premethods"), t_methods)
+    t_class.fixed = true
     
     tlst.set_interface(env, name, t_class, is_local)
     
     if is_local then
-      t_instance.name = name
       set_type(name, t_class)
       check_masking(env, name[1], name.pos)
       tlst.set_local(env, name)
@@ -1371,8 +1398,8 @@ local function check_call (env, exp)
       set_type(exp, Any)
     end
   else
-    local t = replace_self(env, tltype.first(get_type(exp1)), env.self)
-    local inferred_type = replace_self(env, arglist2type(explist, env.strict), env.self)
+    local t = tltype.first(get_type(exp1))
+    local inferred_type = arglist2type(explist, env.strict)
     local msg = "attempt to call %s of type '%s'"
     if tltype.isFunction(t) then
       check_arguments(env, var2name(exp1), t[1], inferred_type, exp.pos)
@@ -1399,21 +1426,36 @@ local function check_invoke (env, exp)
   check_exp(env, exp1)
   check_exp(env, exp2)
   check_explist(env, explist)
-  table.insert(explist, 1, { type = Any })
+  
   local t1, t2 = get_type(exp1), get_type(exp2)
-  t1 = replace_self(env, t1, env.self)
+  
+  --replace first argument with Self for real method applications
+  --TODO: maybe we need to unfold exp1.type for pseudo-method invocations
+  if tltype.isTable(t1) then
+    assert(tltype.isLiteral(t2) and type(t2[1]) == "string")
+    local tfield = tltype.getField(t2,t1)
+    if tfield and tltype.isFunction(tfield) and tltype.isSelf(tfield[1][1]) then
+      table.insert(explist, 1, { type = Self })
+    else
+      table.insert(explist, 1, { type = exp1.type})
+    end
+  else
+    table.insert(explist, 1, { type = exp1.type})
+  end
+  
   if tltype.isTable(t1) or
      tltype.isString(t1) or
      tltype.isStr(t1) then
-    local inferred_type = replace_self(env, arglist2type(explist, env.strict), env.self)
+    
+    local inferred_type =  arglist2type(explist, env.strict)
     local t3
     if tltype.isTable(t1) then
-      t3 = replace_self(env, tltype.getField(t2, t1), t1)
+      t3 = tltype.getField(t2, t1)
       --local s = env.self or Nil
       --if not tltype.subtype(s, t1) then env.self = t1 end
     else
       local string_userdata = env["loaded"]["string"] or tltype.Table()
-      t3 = replace_self(env, tltype.getField(t2, string_userdata), t1)
+      t3 = tltype.getField(t2, string_userdata)
       inferred_type[1] = String
     end
     local msg = "attempt to call method '%s' of type '%s'"
@@ -1647,7 +1689,7 @@ local function check_assignment (env, varlist, explist)
       local t1, t2 = get_type(v[1]), get_type(v[2])
       if tltype.isTable(t1) then
         local field = tltype.getFieldTable(t2,t1)
-        if field.missing then
+        if field and field.missing then
           field.missing = nil
         end
       end
@@ -1915,27 +1957,15 @@ local function check_forin (env, idlist, explist, block)
   return r, _, didgoto
 end
 
-local function check_id (env, exp)
-  local name = exp[1]
-  local l = tlst.get_local(env, name)
-  local t = get_type(l)
-  if tltype.isUnionlist(t) and l.i then
-    set_type(exp, tltype.unionlist2union(t, l.i))
-  else
-    set_type(exp, t)
-  end
-end
-
 local function check_index (env, exp)
   local exp1, exp2 = exp[1], exp[2]
   check_exp(env, exp1)
   check_exp(env, exp2)
   local t1, t2 = tltype.first(get_type(exp1)), tltype.first(get_type(exp2))
   local msg = "attempt to index '%s' with '%s'"
-  t1 = replace_self(env, t1, env.self)
   if tltype.isTable(t1) then
     -- FIX: methods should not leave objects, this is unsafe!
-    local field_type = replace_self(env, tltype.getField(t2, t1), tltype.Any())
+    local field_type = tltype.getField(t2, t1)
     if not tltype.isNil(field_type) then
       local field = tltype.getFieldTable(t2,t1)
       if field.missing then
@@ -1966,6 +1996,17 @@ local function check_index (env, exp)
   end
 end
 
+function check_id (env, exp)
+  local name = exp[1]
+  local l = tlst.get_local(env, name)
+  local t = get_type(l)
+  if tltype.isUnionlist(t) and l.i then
+    set_type(exp, tltype.unionlist2union(t, l.i))
+  else
+    set_type(exp, t)
+  end
+end
+
 function check_var (env, var, exp)
   local tag = var.tag
   if tag == "Id" then
@@ -1980,10 +2021,7 @@ function check_var (env, var, exp)
     check_exp(env, exp2)
     local t1, t2 = tltype.first(get_type(exp1)), tltype.first(get_type(exp2))
     local msg = "attempt to index '%s' with '%s'"
-    t1 = replace_self(env, t1, env.self)
     if tltype.isTable(t1) then
-      local oself = env.self
-      -- another brittle hack for defining methods
       if exp1.tag == "Id" and exp1[1] ~= "_ENV" then env.self = t1 end
       local field_type = tltype.getField(t2, t1)
       if not tltype.isNil(field_type) then
@@ -2018,7 +2056,6 @@ function check_var (env, var, exp)
           set_type(var, Nil)
         end
       end
-      env.self = oself
     elseif tltype.isAny(t1) then
       set_type(var, Any)
       msg = string.format(msg, tltype.tostring(t1), tltype.tostring(t2))
