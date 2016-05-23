@@ -83,7 +83,8 @@ local Keywords = lpeg.P("and") + "break" + "do" + "elseif" + "else" + "end" +
                  "false" + "for" + "function" + "goto" + "if" + "in" +
                  "local" + "nil" + "not" + "or" + "repeat" + "return" +
                  "then" + "true" + "until" + "while" + 
-                 "class" + "abstract" + "method" + "constructor" + "finalizer"
+                 "class" + "abstract" + "method" + "constructor" + "finalizer" +
+                 "super"
 
 tllexer.Reserved = Keywords * -idRest
 

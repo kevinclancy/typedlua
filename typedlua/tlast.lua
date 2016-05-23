@@ -260,9 +260,9 @@ function tlast.classElementAbstractMethod(pos,name,ty)
   return { tag = "AbstractClassMethod", pos = pos, [1] = name, [2] = ty }
 end
 
---classElementConstructor : (pos,parlist,block) -> (classElement)
-function tlast.classElementConstructor(pos,name, parlist,body)
-  return { tag = "ClassConstructor", pos = pos, [1] = name, [2] = parlist, [3] = body }
+--classElementConstructor : (pos,parlist,string|"NoSuperCall",explist|"NoSuperCall",block) -> (classElement)
+function tlast.classElementConstructor(pos,name,parlist,supercons,superargs,body)
+  return { tag = "ClassConstructor", pos = pos, [1] = name, [2] = parlist, [3] = supercons, [4] = superargs, [5] = body }
 end
 
 --classElementFinalizer : (pos,block) -> (classElement)

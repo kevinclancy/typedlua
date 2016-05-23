@@ -118,11 +118,15 @@ local function code_class (class, fmt)
   fmt.line = fmt.line + 1
   for _,elem in ipairs(elems) do
     if elem.tag == "ClassConstructor" then
-      local cons_name, parlist, body = elem[1][1], elem[2], elem[3]
-      str = str .. " function " .. class_name .. "." .. cons_name .. "(" .. code_parlist(parlist,fmt) .. ")"
-      str = indent(str .. "local self = setmetatable({}, { __index = " .. class_name .. ".__premethods })",fmt) 
-      str = str .. code_block(body, fmt)
-      str = str .. indent("return self end",fmt)
+      local cons_name, parlist, supercons_name, superargs, body = elem[1][1], elem[2], elem[3], elem[4], elem[5]
+      if supercons_name == "NoSuperCall" then
+        str = str .. " function " .. class_name .. "." .. cons_name .. "(" .. code_parlist(parlist,fmt) .. ")"
+        str = indent(str .. "local self = setmetatable({}, { __index = " .. class_name .. ".__premethods })",fmt) 
+        str = str .. code_block(body, fmt)
+        str = str .. indent("return self end",fmt)
+      else
+        --error("code generation for superclass constructor calls not yet implemented")
+      end
     elseif elem.tag == "ConcreteClassMethod" then
       local method_name, parlist, tret, body = elem[1][1], elem[2], elem[3], elem[4]
       str = indent(str .. " function " .. class_name .. ".__methods:" .. method_name .. "(" .. code_parlist(parlist,fmt) .. ")",fmt)

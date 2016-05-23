@@ -153,8 +153,11 @@ local G = lpeg.P { "TypedLua";
                           
   ClassConstructor = lpeg.Cp() * tllexer.kw("constructor") * lpeg.V("Id") *
                      tllexer.symb("(") * 
-                     lpeg.V("ParList") * tllexer.symb(")") * lpeg.V("Block") *
-                     tllexer.kw("end") / tlast.classElementConstructor;
+                     lpeg.V("ParList") * tllexer.symb(")") * 
+                     (tllexer.kw("super") * tllexer.symb(".") * lpeg.V("Id") * 
+                      tllexer.symb("(") * lpeg.V("ExpList") * tllexer.symb(")") +
+                      lpeg.Cc("NoSuperCall") * lpeg.Cc("NoSuperCall")) *
+                     lpeg.V("Block") * tllexer.kw("end") / tlast.classElementConstructor;
   
   ClassFinalizer = lpeg.Cp() * tllexer.kw("finalizer") *
                    lpeg.V("Block") * tllexer.kw("end") / tlast.classElementFinalizer;
@@ -666,8 +669,12 @@ local function traverse_constructor (env, constructor)
   tlst.begin_scope(env)
   local status,msg = traverse_parlist(env,constructor[2])
   if not status then return status, msg end
+  if constructor[4] ~= "NoSuperCall" then
+    status, msg = traverse_explist(env,constructor[4])
+  end
+  if not status then return status,msg end
   tlst.set_local(env,{ tag = "Id", "self" })
-  status, msg = traverse_block(env,constructor[3])
+  status, msg = traverse_block(env,constructor[5])
   if not status then return status,msg end
   tlst.end_scope(env)
   tlst.end_function(env)
