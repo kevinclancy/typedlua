@@ -14,6 +14,7 @@ function tlst.new_env (subject, filename, strict)
   env.integer = false
   env.messages = {}
   env.maxscope = 0
+  env.tsuperclass = nil
   env.scope = 0
   env.fscope = 0
   env.loop = 0

@@ -928,10 +928,7 @@ local function check_invoke (env, exp)
   check_exp(env, exp1)
   check_exp(env, exp2)
   check_explist(env, explist)
-  
   local t1, t2 = get_type(exp1), get_type(exp2)
-  
-  --replace first argument with Self for real method applications
   --TODO: maybe we need to unfold exp1.type for pseudo-method invocations
   if tltype.isTable(t1) then
     assert(tltype.isLiteral(t2) and type(t2[1]) == "string")
@@ -944,11 +941,10 @@ local function check_invoke (env, exp)
   else
     table.insert(explist, 1, { type = exp1.type})
   end
-  
   if tltype.isTable(t1) or
      tltype.isString(t1) or
      tltype.isStr(t1) then
-    
+       
     local inferred_type =  arglist2type(explist, env.strict)
     local t3
     if tltype.isTable(t1) then
@@ -986,6 +982,40 @@ local function check_invoke (env, exp)
   end
   return false
 end
+
+local function check_superinvoke(env, exp)
+  local tsuperclass = env.tsuperclass
+  local name_exp = exp[1]
+  local explist = {}
+  explist[1] = tlast.ident(0, "self")
+  for i = 2, #exp do
+    explist[i] = exp[i]
+  end
+  check_exp(env,name_exp)
+  assert(tltype.isStr(get_type(name_exp)))
+  check_explist(env, explist)
+  if not tsuperclass then
+    local msg = "superclass invocations can only occur inside definitions of classes with superclasses"
+    typeerror(env, "superinvoke", msg, exp.pos)
+    return false
+  end
+  local tpremethods = tltype.getField(tltype.Literal("__premethods"), tsuperclass)
+  local tcalled_premethod = tltype.getField(tltype.Literal(name_exp[1]), tpremethods)
+  if not tcalled_premethod then
+    local msg = "superclass %s does not have a premethod called %s"
+    msg = string.format(msg, tltype.tostring(tsuperclass), name_exp[1])
+    typeerror(env, "superinvoke", msg, name_exp.pos)
+    return false
+  end
+  assert(tltype.isFunction(tcalled_premethod))
+  local tinput,toutput = tcalled_premethod[1], tcalled_premethod[2] 
+  local inferred_input = arglist2type(explist, env.strict)
+  local msg = "attempt to call method '%s' of type '%s'"
+  check_arguments(env, "field", tinput, inferred_input, exp.pos)
+  set_type(exp,toutput)
+  return true
+end
+
 
 local function check_local_var (env, id, inferred_type, close_local)
   local local_name, local_type, pos = id[1], id[2], id.pos
@@ -1856,47 +1886,53 @@ end
 
 
 local function check_class (env, stm)
-  local name, isAbstract, elems, parent, is_local = stm[1], stm[2], stm[3], stm[4], stm.is_local
+  local name, isAbstract, elems, superclass, is_local = stm[1], stm[2], stm[3], stm[4], stm.is_local
+  local otsuperclass = env.tsuperclass
+  
   if tlst.get_interface(env, name) then
     local msg = "attempt to redeclare type '%s'"
     msg = string.format(msg, name)
     typeerror(env, "alias", msg, stm.pos)
+    env.tsuperclass = otsuperclass
+    return false
   else
     local constructors, methods, members = get_elem_types(env, elems)
-    
-    local parent_methods = {}
-    local parent_fields = {}
-    local parent_members = {}
+    local superclass_methods = {}
+    local superclass_fields = {}
+    local superclass_members = {}
     --handle inheritance
-    if parent ~= "NoParent" then
-      assert(parent.tag == "Id")
-      check_id(env, parent)
-      local tparent = get_type(parent)
-      local success,members,methods,fields = class_check_tclass(env, tparent, parent.pos)
+    if superclass ~= "NoParent" then
+      assert(superclass.tag == "Id")
+      check_id(env, superclass)
+      local tsuperclass = get_type(superclass)
+      local success,members,methods,fields = class_check_tclass(env, tsuperclass, superclass.pos)
       if success then
-        parent_methods = methods
-        parent_fields = fields
-        parent_members = members
+        superclass_methods = methods
+        superclass_fields = fields
+        superclass_members = members
+        env.tsuperclass = tsuperclass
       else
+        env.tsuperclass = otsuperclass
         return false
       end
+    else
+      env.tsuperclass = nil
     end
-    
     --all instance fields, both members and methods
     local instance_fields = {}
     --instance fields only
     local instance_members = {}
     --instance methods only
     local instance_methods = {}
-    
     for k,v in pairs(methods) do
-      local parent_premethod = parent_methods[k]
-      if parent_premethod then
-        local parent_method = method_from_premethod(parent_premethod)
-        if not tltype.consistent_subtype(v,parent_method[2]) then
+      local superclass_premethod = superclass_methods[k]
+      if superclass_premethod then
+        local superclass_method = method_from_premethod(superclass_premethod)
+        if not tltype.consistent_subtype(v,superclass_method[2]) then
           local msg = "method %s overridden with type %s, which is not a consistent-subtype of %s"
-          msg = string.format(msg, k, tltype.tostring(v), tltype.tostring(parent_method[2]))
+          msg = string.format(msg, k, tltype.tostring(v), tltype.tostring(superclass_method[2]))
           typeerror(env, "inheritance", msg, stm.pos)
+          env.tsuperclass = otsuperclass
           return false
         end
       end
@@ -1905,19 +1941,18 @@ local function check_class (env, stm)
       instance_fields[#instance_fields+1] = newelem
       instance_methods[#instance_methods+1] = newelem    
     end
-    
-    for k,v in pairs(parent_methods) do
+    for k,v in pairs(superclass_methods) do
       if not methods[k] then --don't add overridden methods
         instance_fields[#instance_fields+1] = method_from_premethod(v)
         instance_methods[#instance_methods+1] = method_from_premethod(v)
       end
     end
-    
     for k,v in pairs(members) do 
-      if parent_members[k] then
+      if superclass_members[k] then
         local msg = "member %s declared twice: once in class %s and once in class %s"
         msg = string.format(msg, k, parent[1], name[1])
         typeerror(env, "inheritance", msg, v.pos)
+        env.tsuperclass = otsuperclass
         return false
       end
       
@@ -1925,50 +1960,42 @@ local function check_class (env, stm)
       instance_fields[#instance_fields+1] = newelem
       instance_members[#instance_members+1] = newelem
     end
-    
-     for k,v in pairs(parent_members) do
+     for k,v in pairs(superclass_members) do
       instance_fields[#instance_fields+1] = v
       instance_members[#instance_members+1] = v
     end   
-    
     local t_instance = tltype.Table(table.unpack(instance_fields))
     t_instance.fixed = true
     t_instance.name = name
-    
     for _,elem in ipairs(elems) do
       if elem.tag == "ConcreteClassMethod" then
         local name,parlist,tret,body = elem[1], elem[2], elem[3], elem[4]
         check_method(env,parlist,tret,body,t_instance,elem.pos)
       elseif elem.tag == "ClassConstructor" then
-        check_constructor(env, elem, instance_members, parent_members, parent)
+        check_constructor(env, elem, instance_members, superclass_members, superclass)
       elseif elem.tag == "ClassFinalizer" then
       
       end
     end
-    
     local class_constructors = {}
     for k,v in pairs(constructors) do
       --overwrite constructor return value with instance type
       v[2] = t_instance
       class_constructors[#class_constructors + 1] = tltype.Field(true, tltype.Literal(k), v)
     end
-  
     local t_methods = tltype.Table(table.unpack(instance_methods))
     for i,field in ipairs(t_methods) do t_methods[i] = premethod_from_method(field,t_instance) end
     local t_class = tltype.Table(table.unpack(class_constructors))
     t_class[#t_class + 1] = tltype.Field(true, tltype.Literal("__premethods"), t_methods)
     t_class.fixed = true
-    
     tlst.set_interface(env, name, t_class, is_local)
-    
     if is_local then
       set_type(name, t_class)
       check_masking(env, name[1], name.pos)
       tlst.set_local(env, name)
-    else
     end
-    
   end
+  env.tsuperclass = otsuperclass
 end
 
 function check_id (env, exp)
@@ -2071,6 +2098,8 @@ function check_exp (env, exp)
     check_call(env, exp)
   elseif tag == "Invoke" then
     check_invoke(env, exp)
+  elseif tag == "SuperInvoke" then
+    check_superinvoke(env, exp)
   elseif tag == "Id" then
     check_id(env, exp)
   elseif tag == "Index" then

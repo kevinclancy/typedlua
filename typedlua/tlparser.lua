@@ -259,7 +259,8 @@ local G = lpeg.P { "TypedLua";
               lpeg.Cp() * tllexer.symb("...") / tlast.exprDots +
               lpeg.V("FunctionDef") +
               lpeg.V("Constructor") +
-              lpeg.V("SuffixedExp");
+              lpeg.V("SuffixedExp") +
+              lpeg.V("SuperInvoke");
   SuffixedExp = lpeg.Cf(lpeg.V("PrimaryExp") * (
                 (lpeg.Cp() * tllexer.symb(".") *
                   (lpeg.Cp() * tllexer.token(tllexer.Name, "Name") / tlast.exprString)) /
@@ -272,6 +273,9 @@ local G = lpeg.P { "TypedLua";
                 (lpeg.Cp() * lpeg.V("FuncArgs")) / tlast.call)^0, tlast.exprSuffixed);
   PrimaryExp = lpeg.V("Var") +
                lpeg.Cp() * tllexer.symb("(") * lpeg.V("Expr") * tllexer.symb(")") / tlast.exprParen;
+  SuperInvoke = lpeg.Cp() * tllexer.kw("super") * tllexer.symb(":") * 
+                (lpeg.Cp() * tllexer.token(tllexer.Name, "Name") / tlast.exprString) * 
+                lpeg.V("FuncArgs") / tlast.superinvoke;
   Block = lpeg.Cp() * lpeg.V("StatList") * lpeg.V("RetStat")^-1 / tlast.block;
   IfStat = lpeg.Cp() * tllexer.kw("if") * lpeg.V("Expr") * tllexer.kw("then") * lpeg.V("Block") *
            (tllexer.kw("elseif") * lpeg.V("Expr") * tllexer.kw("then") * lpeg.V("Block"))^0 *
@@ -427,6 +431,16 @@ local function traverse_invoke (env, invoke)
     if not status then return status, msg end
   end
   return true
+end
+
+local function traverse_superinvoke(env, superinvoke)
+  local status, msg = traverse_exp(env, superinvoke[1])
+  if not status then return status, msg end
+  for i=2, #superinvoke do
+    status, msg = traverse_exp(env, superinvoke[i])
+    if not status then return status, msg end
+  end
+  return true  
 end
 
 local function traverse_assignment (env, stm)
@@ -634,6 +648,8 @@ function traverse_exp (env, exp)
     return traverse_call(env, exp)
   elseif tag == "Invoke" then
     return traverse_invoke(env, exp)
+  elseif tag == "SuperInvoke" then
+    return traverse_superinvoke(env, exp)
   elseif tag == "Id" or
          tag == "Index" then
     return traverse_var(env, exp)

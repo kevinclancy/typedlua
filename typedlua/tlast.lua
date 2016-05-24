@@ -217,7 +217,7 @@ function tlast.statInterface (pos, name, t)
   return { tag = "Interface", pos = pos, [1] = name, [2] = t }
 end
 
---statClass : (number, string, boolean, class|"NoParent", class_element_array) -> (stat)
+--statClass : (number, boolean, string, class|"NoParent", class_element_array, ident) -> (stat)
 function tlast.statClass(pos,isAbstract,name,superclass,elems)
   return { tag = "Class", pos = pos, [1] = name, [2] = isAbstract, [3] = elems, [4] = superclass } 
 end
@@ -449,6 +449,16 @@ function tlast.invoke (pos, e1, e2, ...)
     a[i + 2] = list[i]
   end
   return a
+end
+
+-- superinvoke : (number, ename, ...) -> (apply)
+function tlast.superinvoke(pos, e, ...)
+  local a = { tag = "SuperInvoke", pos = pos, [1] = e }
+  local list = { ... }
+  for i = 1, #list do
+    a[i + 1] = list[i]
+  end
+  return a  
 end
 
 -- setConst : (expr|field|id) -> (expr|field|id)

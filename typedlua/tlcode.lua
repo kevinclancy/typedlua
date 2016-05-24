@@ -89,6 +89,16 @@ local function code_invoke (invoke, fmt)
   return str
 end
 
+local function code_superinvoke (superinvoke, fmt)
+  local l = {}
+  for k = 2, #superinvoke do
+    l[k - 1] = code_exp(superinvoke[k], fmt)
+  end
+  local str = "super" .. ".__premethods." .. superinvoke[1][1]
+  str = str .. "(" .. "self," .. table.concat(l, ",") .. ")"
+  return str  
+end
+
 local function code_parlist (parlist, fmt)
   local l = {}
   local len = #parlist
@@ -108,31 +118,38 @@ local function code_parlist (parlist, fmt)
 end
 
 local function code_class (class, fmt)
-  --return { tag = "Class", pos = pos, [1] = name, [2] = isAbstract, [3] = elems } 
-  local islocal, class_name, class_abstract, elems = class.is_local, class[1][1], class[2], class[3]
+  local islocal, class_name, class_abstract = class.is_local, class[1][1], class[2]
+  local elems, superclass = class[3], class[4]
   local str = ""
   if islocal then
     str = str .. "local "
   end
   str = indent(str .. class_name .. " = { __premethods = {} } ", fmt)
-  fmt.line = fmt.line + 1
+  str = str .. " do "
+  if superclass ~= "NoParent" then 
+    str = str .. "local super = " .. superclass[1]
+  end
   for _,elem in ipairs(elems) do
     if elem.tag == "ClassConstructor" then
       local cons_name, parlist, supercons_name, superargs, body = elem[1][1], elem[2], elem[3], elem[4], elem[5]
-      if supercons_name == "NoSuperCall" then
-        str = str .. " function " .. class_name .. "." .. cons_name .. "(" .. code_parlist(parlist,fmt) .. ")"
-        str = indent(str .. "local self = setmetatable({}, { __index = " .. class_name .. ".__premethods })",fmt) 
-        str = str .. code_block(body, fmt)
-        str = str .. indent("return self end",fmt)
+      local supercall
+      str = str .. " function " .. class_name .. "." .. cons_name .. "(" .. code_parlist(parlist,fmt) .. ")"
+      if superclass and supercons_name ~= "NoSuperCall" then
+        str = str .. "local self = super." .. supercons_name[1] .. "(" .. code_explist(superargs) .. ") "
       else
-        --error("code generation for superclass constructor calls not yet implemented")
+        str = str .. "local self = {}"
       end
+      str = indent(str .. " setmetatable(self, { __index = " .. class_name .. ".__premethods })",fmt) 
+      str = str .. code_block(body, fmt)
+      str = str .. indent("return self end",fmt)
     elseif elem.tag == "ConcreteClassMethod" then
       local method_name, parlist, tret, body = elem[1][1], elem[2], elem[3], elem[4]
-      str = indent(str .. " function " .. class_name .. ".__methods:" .. method_name .. "(" .. code_parlist(parlist,fmt) .. ")",fmt)
+      str = indent(str .. " function " .. class_name .. ".__premethods:" .. method_name .. "(" .. code_parlist(parlist,fmt) .. ")",fmt)
       str = str .. code_block(body,fmt) .. indent("end",fmt)
     end
   end
+  -- close out the do formatted above
+  str = str .. " end"
   return str
 end
 
@@ -233,6 +250,8 @@ function code_exp (exp, fmt)
     return code_call(exp, fmt)
   elseif tag == "Invoke" then
     return code_invoke(exp, fmt)
+  elseif tag == "SuperInvoke" then
+    return code_superinvoke(exp, fmt)
   elseif tag == "Id" or
          tag == "Index" then
     return code_var(exp, fmt)
