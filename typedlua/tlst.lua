@@ -18,11 +18,124 @@ function tlst.new_env (subject, filename, strict)
   env.scope = 0
   env.fscope = 0
   env.loop = 0
+  env.nominal = {}
   env["function"] = {}
-  env["interface"] = {}
-  env["userdata"] = {}
+  
+  --maps typenames to typeinfos
+  --a typeinfo has a kind(field "kind"), a type(field "type"), a classifier (field "class") (userdata, nominal, or structural)
+  env.types = {}
+  
+  --maps a typeinfo to a typeinfo,{type} pair. This should include all
+  --nominal edges that have been transitively deduced in the global scope
+  env.nominal_edges = {}
+
   env["loaded"] = {}
   return env
+end
+
+-- typeinfo constructors --
+
+-- (string,type) -> (typeinfo)
+function tlst.typeinfo_Userdata (name,t)
+  return { tag = "TIUserdata", [1] = t }
+end
+
+-- (string,type) -> (typeinfo)
+function tlst.typeinfo_Structural (name,t)
+  return { tag = "TIStructural", [1] = t }
+end
+
+-- (string,type,kind) -> (typeinfo)
+function tlst.typeinfo_Nominal (name, t,k)
+  -- 1 - name 1 - type, 2 - kind, 3 - parents
+  -- type parent = {typeinfo => { path = {typeinfo}, inst = {type}}
+  return { tag = "TINominal", [1] = t, [2] = k }
+end
+
+-- (type) -> (typeinfo)
+function tlst.typeinfo_Variable(tbound)
+  return { tag = "TIVariable", [1] = tbound }
+end
+
+function tlst.get_all_nominal_edges (env, tisource, edge_map_out)
+  local scope = env.scope
+  for s = scope, 1, -1 do
+    if env[s].nominal_edges[tisource] then
+      for _,edges in pairs(env[s].nominal_edges[tisource]) do
+        for k,edge in ipairs(edges) do
+          edge_map_out[k] = edge
+        end
+      end
+    end
+  end  
+end
+
+-- get_nominal_edges : (env,typeinfo,typeinfo,out {{type}}) -> ()
+function tlst.get_nominal_edges (env, tisource, tidest, array_out)
+  for i,_ in ipairs(array_out) do array_out[i] = nil end
+  local scope = env.scope
+  for s = scope, 1, -1 do
+    if env[s].nominal_edges[tisource] then
+      local edges = env[s].nominal_edges[tisource][tidest]
+      if edges then
+        for _,edge in ipairs(edges) do
+          array_out[#array_out + 1] = edge
+        end
+      end
+    end
+  end  
+end
+
+-- (env, string, string, {type}, (type, string, type) -> (type)) -> ()
+function tlst.add_nominal_edge (env, source, dest, instantiation, subst)
+  local scope = env.scope
+  
+  local ti_source = tlst.get_typeinfo(env,source)
+  local ti_dest = tlst.get_typeinfo(env,dest)
+  assert(tisource ~= nil and ti_source.tag == "TINominal")
+  assert(tidest ~= nil and ti_dest.tag == "TINominal")
+  local ksource,kdest = ti_source.kind, ti_dest.kind
+  local dest_param_names = kdest[1]
+  assert(#instantiation == #dest_param_names)
+  
+  local dest_edges = {}
+  tlst.get_all_nominal_edges(env, ti_dest, dest_edges)
+  
+  -- add direct edge
+  if not env[s].nominal_edges[ti_source] then
+    env[s].nominal_edges[ti_source] = {}
+  end
+  local src_edges = env[s].nominal_edges[ti_source]
+  local src_dest_edges = src_edges[ti_dest]
+  src_dest_edges[#src_dest_edges + 1] = { path = {ti_source}, inst = instantiation }
+  
+  -- add transitive edges
+  for ti_parent,edge in ipairs(dest_edges) do
+    local edges_to_parent = src_edges[ti_parent]
+    
+    --checking for cycles should be done externally
+    assert(ti_parent ~= ti_source)
+    
+    local new_instantiation = {}
+    for i=1,#dest_param_names do 
+      local name = dest_param_names[i]
+      local tinst = instantiation[i]
+      
+      local new_inst = {}
+      for j,t in ipairs(edge.inst) do
+        new_inst[j] = subst(t,name,tinst)
+      end
+      
+      new_instantiation[j] = new_inst
+    end
+    
+    local new_path = {tisource}
+    for j,ti in ipairs(edge.path) do
+      new_path[j+1] = ti
+    end
+    
+    edges_to_parent[#edges_to_parent + 1] = { path = new_path, inst = new_instantiation }
+  end
 end
 
 -- new_scope : () -> (senv)
@@ -32,8 +145,8 @@ local function new_scope ()
   senv["label"] = {}
   senv["local"] = {}
   senv["unused"] = {}
-  senv["interface"] = {}
-  senv["userdata"] = {}
+  senv.types = {}
+  senv.nominal_edges = {}
   return senv
 end
 
@@ -138,51 +251,24 @@ function tlst.unused (env)
   return env[scope]["unused"]
 end
 
--- set_interface : (env, string, type, boolean?) -> ()
-function tlst.set_interface (env, name, t, is_local)
+-- set_typeinfo : (env,name,typeinfo,bool) -> ()
+function tlst.set_typeinfo (env, name, ti, is_local)
   if is_local then
     local scope = env.scope
-    env[scope]["interface"][name] = t
+    env[scope].types[name] = ti
   else
-    env["interface"][name] = t
+    env.types[name] = ti
   end
 end
 
--- get_interface : (env) -> (type?)
-function tlst.get_interface (env, name)
+-- get_typeinfo : (env,string) -> (typeinfo?)
+function tlst.get_typeinfo (env, name)
   local scope = env.scope
   for s = scope, 1, -1 do
-    local t = env[s]["interface"][name]
+    local t = env[s].types[name]
     if t then return t end
   end
-  if env["interface"][name] then
-    return env["interface"][name]
-  end
-  for s = scope, 1, -1 do
-    local t = env[s]["userdata"][name]
-    if t then return t end
-  end
-  return env["userdata"][name]
-end
-
--- set_userdata : (env, string, type, boolean?) -> ()
-function tlst.set_userdata (env, name, t, is_local)
-  if is_local then
-    local scope = env.scope
-    env[scope]["userdata"][name] = t
-  else
-    env["userdata"][name] = t
-  end
-end
-
--- get_userdata : (env) -> (type?)
-function tlst.get_userdata (env, name)
-  local scope = env.scope
-  for s = scope, 1, -1 do
-    local t = env[s]["userdata"][name]
-    if t then return t end
-  end
-  return env["userdata"][name]
+  return env.types[name]
 end
 
 -- new_fenv : () -> (fenv)

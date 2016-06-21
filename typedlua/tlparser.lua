@@ -125,7 +125,7 @@ local G = lpeg.P { "TypedLua";
   ArrayType = lpeg.Carg(3) * lpeg.V("FieldType") / tltype.ArrayField;
   KeyType = lpeg.V("BaseType") + lpeg.V("ValueType") + lpeg.V("AnyType");
   FieldType = lpeg.V("Type") * lpeg.Cc(tltype.Nil()) / tltype.Union;
-  VariableType = tllexer.token(tllexer.Name, "Type") / tltype.Variable;
+  VariableType = tllexer.token(tllexer.Name, "Type") / tltype.Symbol;
   RetType = lpeg.V("NilableTuple") +
             lpeg.V("Type") * lpeg.Carg(2) / tltype.retType;
   Id = lpeg.Cp() * tllexer.token(tllexer.Name, "Name") / tlast.ident;

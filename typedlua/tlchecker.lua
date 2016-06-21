@@ -176,7 +176,7 @@ local function replace_names (env, t, pos, ignore)
       t[k][2] = replace_names(env, t[k][2], pos, ignore)
     end
     return t
-  elseif tltype.isVariable(t) then
+  elseif tltype.isSymbol(t) then
     if not ignore[t[1]] then
       local r = replace_names(env, get_interface(env, t[1], pos), pos, ignore)
       r.name = t[1]
