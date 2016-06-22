@@ -18,6 +18,9 @@ function tlst.new_env (subject, filename, strict)
   env.scope = 0
   env.fscope = 0
   env.loop = 0
+  
+  env.variance = 1
+  
   env.nominal = {}
   env["function"] = {}
   
@@ -36,25 +39,23 @@ end
 -- typeinfo constructors --
 
 -- (string,type) -> (typeinfo)
-function tlst.typeinfo_Userdata (name,t)
+function tlst.typeinfo_Userdata (name, t)
   return { tag = "TIUserdata", [1] = t }
 end
 
 -- (string,type) -> (typeinfo)
-function tlst.typeinfo_Structural (name,t)
+function tlst.typeinfo_Structural (name, t)
   return { tag = "TIStructural", [1] = t }
 end
 
 -- (string,type,kind) -> (typeinfo)
-function tlst.typeinfo_Nominal (name, t,k)
-  -- 1 - name 1 - type, 2 - kind, 3 - parents
-  -- type parent = {typeinfo => { path = {typeinfo}, inst = {type}}
+function tlst.typeinfo_Nominal (name, t, k)
   return { tag = "TINominal", [1] = t, [2] = k }
 end
 
 -- (type) -> (typeinfo)
-function tlst.typeinfo_Variable(tbound)
-  return { tag = "TIVariable", [1] = tbound }
+function tlst.typeinfo_Variable (tbound, variance)
+  return { tag = "TIVariable", [1] = tbound, [2] = variance }
 end
 
 function tlst.get_all_nominal_edges (env, tisource, edge_map_out)

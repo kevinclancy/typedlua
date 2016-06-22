@@ -196,7 +196,12 @@ end
 
 -- Union : (type*) -> (type)
 function tltype.Union (...)
-  local l1 = {...}
+  return { tag = "TUnion", ... }
+end
+
+function tltype.simplifyUnion(env, t)
+  assert(t.tag == "TUnion")
+  local l1 = t
   -- remove unions of unions
   local l2 = {}
   for i = 1, #l1 do
@@ -213,62 +218,63 @@ function tltype.Union (...)
   for i = 1, #l2 do
     local enter = true
     for j = i + 1, #l2 do
-      if tltype.subtype(l2[i], l2[j]) and tltype.subtype(l2[j], l2[i]) then
+      if tltype.subtype(env, l2[i], l2[j]) and tltype.subtype(env, l2[j], l2[i]) then
         enter = false
         break
       end
     end
     if enter then table.insert(l3, l2[i]) end
   end
-  -- simplify union
-  local t = { tag = "TUnion" }
+  -- simplify union, TODO: this seems broken, as (Any -> Any | Any -> Any) would incorrectly simplify to Any
+  local ret = { tag = "TUnion" }
   for i = 1, #l3 do
     local enter = true
     for j = 1, #l3 do
-      if i ~= j and tltype.consistent_subtype(l3[i], l3[j]) then
+      if i ~= j and tltype.consistent_subtype(env, l3[i], l3[j]) then
         enter = false
         break
       end
     end
-    if enter then table.insert(t, l3[i]) end
+    if enter then table.insert(ret, l3[i]) end
   end
-  if #t == 0 then
+  if #ret == 0 then
     return tltype.Any()
-  elseif #t == 1 then
-    return t[1]
+  elseif #ret == 1 then
+    return ret[1]
   else
-    return t
+    return ret
   end
 end
 
--- isUnion : (type, type?) -> (boolean)
-function tltype.isUnion (t1, t2)
-  if not t2 then
-    return t1.tag == "TUnion"
-  else
-    if t1.tag == "TUnion" then
-      for k, v in ipairs(t1) do
-        if tltype.subtype(t2, v) and tltype.subtype(v, t2) then
-          return true
-        end
+-- isUnion : (type) -> (boolean)
+function tltype.isUnion (t1)
+  return t1.tag == "TUnion"
+end
+
+-- isUnionWith : (env,type,type) -> (boolean)
+function tltype.isUnionWith(env,t1,t2)
+  if t1.tag == "TUnion" then
+    for k, v in ipairs(t1) do
+      if tltype.subtype(env, t2, v) and tltype.subtype(env, v, t2) then
+        return true
       end
-      return false
-    else
-      return false
     end
+    return false
+  else
+    return false
   end
 end
 
 -- filterUnion : (type, type) -> (type)
-function tltype.filterUnion (u, t)
+function tltype.filterUnion (env, u, t)
   if tltype.isUnion(u) then
     local l = {}
     for k, v in ipairs(u) do
-      if not (tltype.subtype(t, v) and tltype.subtype(v, t)) then
+      if not (tltype.subtype(env, t, v) and tltype.subtype(env, v, t)) then
         table.insert(l, v)
       end
     end
-    return tltype.Union(table.unpack(l))
+    return tltype.Union(env, table.unpack(l))
   else
     return u
   end
@@ -441,10 +447,10 @@ function tltype.isTable (t)
 end
 
 -- getField : (type, type) -> (type)
-function tltype.getField (f, t)
+function tltype.getField (env, f, t)
   if tltype.isTable(t) then
     for k, v in ipairs(t) do
-      if tltype.consistent_subtype(f, v[1]) then
+      if tltype.consistent_subtype(env, f, v[1]) then
         return v[2]
       end
     end
@@ -456,10 +462,10 @@ end
 
 --rather than getting the value that corresponds to a field,
 --get the table that represents the field
-function tltype.getFieldTable(k,t)
+function tltype.getFieldTable(env, k,t)
   assert(tltype.isTable(t))
   for _, v in ipairs(t) do
-    if tltype.consistent_subtype(k, v[1]) then
+    if tltype.consistent_subtype(env, k, v[1]) then
       return v
     end
   end
@@ -528,6 +534,77 @@ end
 
 --type substitution
 
+function tltype.unfold (env, t)
+  if tltype.isSymbol(t) then
+    local ti = tlst.get_typeinfo(env,t[1])
+    if ti.tag == "TIUserdata" then
+      return ti[1]
+    elseif ti.tag == "TIStructural" then
+      return ti[1]
+    elseif ti.tag == "TIVariable" then
+      return ti[1]
+    elseif ti.tag == "TINominal" then
+      local k = ti[2]
+      local args = t[2]
+      local param_names = k[1]
+      if args and #param_names == #args then
+        local res = ti[1]
+        for i=1,#args do
+          res = tltype.substitute(res,param_names[i],args[i])
+        end
+        return res
+      elseif (not args) and #param_names == 0 then
+        return ti[1]
+      else
+        return tltype.Any()
+      end
+    end
+  else
+    return t
+  end
+end
+
+local function check_recursive (t, name)
+  if tltype.isLiteral(t) or
+     tltype.isBase(t) or
+     tltype.isNil(t) or
+     tltype.isValue(t) or
+     tltype.isAny(t) or
+     tltype.isSelf(t) or
+     tltype.isVoid(t) then
+    return false
+  elseif tltype.isUnion(t) or
+         tltype.isUnionlist(t) or
+         tltype.isTuple(t) then
+    for k, v in ipairs(t) do
+      if check_recursive(v, name) then
+        return true
+      end
+    end
+    return false
+  elseif tltype.isFunction(t) then
+    return check_recursive(t[1], name) or check_recursive(t[2], name)
+  elseif tltype.isTable(t) then
+    for k, v in ipairs(t) do
+      if check_recursive(v[2], name) then
+        return true
+      end
+    end
+    return false
+  elseif tltype.isSymbol(t) then
+    return t[1] == name
+  elseif tltype.isVararg(t) then
+    return check_recursive(t[1], name)
+  else
+    return false
+  end
+end
+
+-- checkRecursive : (type, string) -> (boolean)
+function tltype.checkRecursive (t, name)
+  return check_recursive(t, name)
+end
+
 -- substitute : (type,var,type)
 -- replace x with s in t
 local function substitute(t,x,s)
@@ -578,17 +655,23 @@ local function substitute(t,x,s)
     end
     return tltype.Table(res)      
   elseif t.tag == "TSymbol" then
-    local name = t[1]
-    if name = x then
+    local name,args = t[1],t[2]
+    
+    if name == x then
+      assert(#args == 0)
       return s
+    elseif #args > 0 then
+      local new_args = {}
+      for i,arg in ipairs(args) do
+        new_args[i] = substitute(arg,x,s)
+      end
+      return tltype.Symbol(name,new_args)
     else
       return t
     end
   else
     assert("type substitution error: expected type, got " .. t.tag) 
   end
-end
-
 end
 
 --kinds
@@ -604,9 +687,9 @@ function tltype.isProperKind (k)
 end
 
 -- OperatorKind : ({string},{type},{"Covariant"|"Contravariant"|"Invariant"}) -> (kind)
-function tltype.OperatorKind (paramNames,argUpperBounds,variances)
-  assert(#argNames == #argUpperBounds)
-  return { tag = "KOperator", [1] = paramNames, [2] = argUpperBounds, [3] = variances }
+function tltype.OperatorKind (names,bounds,variances)
+  assert(#names == #bounds and #bounds == #variances)
+  return { tag = "KOperator", [1] = names, [2] = bounds, [3] = variances }
 end
 
 -- isOperatorKind : (kind) -> (boolean)
@@ -614,60 +697,11 @@ function tltype.isOperatorKind (k)
   return k.tag == "KOperator"
 end
 
+
 -- subtyping and consistent-subtyping
 local subtype
 
--- computes all transitive inheritances between nominal types
--- (see Transitivity rule on page 3 of Getting F-Bounded Polymorphism into Shape)
---
--- (typeinfo,typeinfo) -> ({ {type} })
---[[
-
-actually, this should be precomputed on the fly
-
-local function compute_transitive_inheritances(tisrc, tidest)
-  --path : {parent}
-  local curr_path = {}
-  
-  -- all paths found from tisrc to tidest
-  local computed_paths = {}
-  
-  local function backtrack(ticurr)   
-    if ticurr == tidest then
-      local final_path = {}
-      for i,v in pairs(curr_path) do
-        final_path[i] = v
-      end
-      computed_paths[#computed_paths + 1] = final_path
-    end
-    local parents = ticurr[3]
-    for _,parent in ipairs(parents) do
-      path[#path + 1] = parent
-      backtrack(parent[1])
-      path[#path] = nil
-    end
-  end
-  
-  local results = {}
-  
-  --now that we have computed the paths, we perform substitution to find
-  --a tuple of types that relates the subclass to the superclass via inheritance
-  for _,path in ipairs(computed_paths) do
-    local types = {}
-    for i=2,#path do
-      local prev = path[i-1]
-      local ti_prev = prev[1]
-      local k_prev = ti_prev[2]
-      
-      local k_prev = path[i] 
-      
-    end
-  end
-  
-end
-]]
-
-local function subtype_literal (as, env, t1, t2)
+local function subtype_literal (assume, env, t1, t2)
   if tltype.isLiteral(t1) and tltype.isLiteral(t2) then
     return t1[1] == t2[1]
   elseif tltype.isLiteral(t1) and tltype.isBase(t2) then
@@ -687,7 +721,7 @@ local function subtype_literal (as, env, t1, t2)
   end
 end
 
-local function subtype_base (as,env, t1, t2)
+local function subtype_base (assume,env, t1, t2)
   if tltype.isBase(t1) and tltype.isBase(t2) then
     return t1[1] == t2[1] or (tltype.isInteger(t1) and tltype.isNumber(t2))
   else
@@ -695,15 +729,15 @@ local function subtype_base (as,env, t1, t2)
   end
 end
 
-local function subtype_nil (as, env, t1, t2)
+local function subtype_nil (assume, env, t1, t2)
   return tltype.isNil(t1) and tltype.isNil(t2)
 end
 
-local function subtype_top (as, env, t1, t2)
+local function subtype_top (assume, env, t1, t2)
   return tltype.isValue(t2)
 end
 
-local function subtype_any (as, env, t1, t2, relation)
+local function subtype_any (assume, env, t1, t2, relation)
   if relation == "<:" then
     return tltype.isAny(t1) and tltype.isAny(t2)
   else
@@ -711,21 +745,21 @@ local function subtype_any (as, env, t1, t2, relation)
   end
 end
 
-local function subtype_self (as, env, t1, t2)
+local function subtype_self (assume, env, t1, t2)
   return tltype.isSelf(t1) and tltype.isSelf(t2)
 end
 
-local function subtype_union (as, env, t1, t2, relation)
+local function subtype_union (assume, env, t1, t2, relation)
   if tltype.isUnion(t1) then
     for k, v in ipairs(t1) do
-      if not subtype(as, env, v, t2, relation) then
+      if not subtype(assume, env, v, t2, relation) then
         return false
       end
     end
     return true
   elseif tltype.isUnion(t2) then
     for k, v in ipairs(t2) do
-      if subtype(as, env, t1, v, relation) then
+      if subtype(assume, env, t1, v, relation) then
         return true
       end
     end
@@ -735,39 +769,39 @@ local function subtype_union (as, env, t1, t2, relation)
   end
 end
 
-local function subtype_function (as, env, t1, t2, relation)
+local function subtype_function (assume, env, t1, t2, relation)
   if tltype.isFunction(t1) and tltype.isFunction(t2) then
-    return subtype(as, env, t2[1], t1[1], relation) and subtype(as, env, t1[2], t2[2], relation)
+    return subtype(assume, env, t2[1], t1[1], relation) and subtype(assume, env, t1[2], t2[2], relation)
   else
     return false
   end
 end
 
-local function subtype_field (as, env, f1, f2, relation)
+local function subtype_field (assume, env, f1, f2, relation)
   if tltype.isField(f1) and tltype.isField(f2) then
-    return subtype(as, env, f2[1], f1[1], relation) and
-           subtype(as, env, f1[2], f2[2], relation) and
-           subtype(as, env, f2[2], f1[2], relation)
+    return subtype(assume, env, f2[1], f1[1], relation) and
+           subtype(assume, env, f1[2], f2[2], relation) and
+           subtype(assume, env, f2[2], f1[2], relation)
   elseif tltype.isField(f1) and tltype.isConstField(f2) then
-    return subtype(as, env, f2[1], f1[1], relation) and
-           subtype(as, env, f1[2], f2[2], relation)
+    return subtype(assume, env, f2[1], f1[1], relation) and
+           subtype(assume, env, f1[2], f2[2], relation)
   elseif tltype.isConstField(f1) and tltype.isConstField(f2) then
-    return subtype(as, env, f2[1], f1[1], relation) and
-           subtype(as, env, f1[2], f2[2], relation)
+    return subtype(assume, env, f2[1], f1[1], relation) and
+           subtype(assume, env, f1[2], f2[2], relation)
   else
     return false
   end
 end
 
-local function subtype_table (as, env, t1, t2, relation)
+local function subtype_table (assume, env, t1, t2, relation)
   if tltype.isTable(t1) and tltype.isTable(t2) then
     if t1.unique then
       local m, n = #t1, #t2
       local k, l = 0, {}
       for i = 1, m do
         for j = 1, n do
-          if subtype(as, env, t1[i][1], t2[j][1], relation) then
-            if subtype(as, env, t1[i][2], t2[j][2], relation) then
+          if subtype(assume, env, t1[i][1], t2[j][1], relation) then
+            if subtype(assume, env, t1[i][2], t2[j][2], relation) then
               if not l[j] then
                 k = k + 1
                 l[j] = true
@@ -783,7 +817,7 @@ local function subtype_table (as, env, t1, t2, relation)
       else
         for j = 1, n do
           if not l[j] then
-            if not subtype(as, env, tltype.Nil(), t2[j][2], relation) then
+            if not subtype(assume, env, tltype.Nil(), t2[j][2], relation) then
               return false
             end
           end
@@ -795,8 +829,8 @@ local function subtype_table (as, env, t1, t2, relation)
       local k, l = 0, {}
       for i = 1, m do
         for j = 1, n do
-          if subtype(as, env, t1[i][1], t2[j][1], relation) then
-            if subtype_field(as, env, t2[j], t1[i], relation) then
+          if subtype(assume, env, t1[i][1], t2[j][1], relation) then
+            if subtype_field(assume, env, t2[j], t1[i], relation) then
               if not l[j] then
                 k = k + 1
                 l[j] = true
@@ -812,7 +846,7 @@ local function subtype_table (as, env, t1, t2, relation)
       else
         for j = 1, n do
           if not l[j] then
-            if not subtype(as, env, tltype.Nil(), t2[j][2], relation) then
+            if not subtype(assume, env, tltype.Nil(), t2[j][2], relation) then
               return false
             end
           end
@@ -824,7 +858,7 @@ local function subtype_table (as, env, t1, t2, relation)
       for i = 1, n do
         local subtype = false
         for j = 1, m do
-          if subtype_field(as, env, t1[j], t2[i], relation) then
+          if subtype_field(assume, env, t1[j], t2[i], relation) then
             subtype = true
             break
           end
@@ -838,7 +872,7 @@ local function subtype_table (as, env, t1, t2, relation)
   end
 end
 
-local function subtype_symbol (as, env, t1, t2, relation)
+local function subtype_symbol (assume, env, t1, t2, relation)
   local t1_symbol = tltype.isSymbol(t1)
   local t2_symbol = tltype.isSymbol(t2)
   
@@ -847,11 +881,11 @@ local function subtype_symbol (as, env, t1, t2, relation)
   
   -- handle bounded variables
   if t1_symbol and ti1.tag == "TIVariable" then
-    return subtype(as, env, ti1[1], t2, relation)  
+    return subtype(assume, env, ti1[1], t2, relation)  
   end
   
   if t2_symbol and ti2.tag == "TIVariable" then
-    return subtype(as, env, t1, ti2[1], relation)  
+    return subtype(assume, env, t1, ti2[1], relation)  
   end    
   
   --handle userdata
@@ -866,11 +900,11 @@ local function subtype_symbol (as, env, t1, t2, relation)
   
   --handle structural
   if t1_symbol and ti1.tag == "TIStructural" then
-    return subtype(as, env, ti1[1], t2, relation)
+    return subtype(assume, env, ti1[1], t2, relation)
   end 
   
   if t2_symbol and ti2.tag == "TIStructural" then
-    return subtype(as, env, t1, ti2[1], relation)
+    return subtype(assume, env, t1, ti2[1], relation)
   end 
   
   if t1_symbol and ti1.tag == "TINominal" and t2_symbol and ti2.tag == "TINominal" then
@@ -886,7 +920,7 @@ local function subtype_symbol (as, env, t1, t2, relation)
       local path = edge.path
       local inst = edge.inst
       
-      assert(#inst = #k2_variances)
+      assert(#inst == #k2_variances)
       
       local new_inst = {}
       for i,t in ipairs(inst) do
@@ -900,16 +934,16 @@ local function subtype_symbol (as, env, t1, t2, relation)
         local variance = k2_variances[i]
         for j,arg in ipairs(ti2.args) do
           if variance == "Covariant" then
-            if not subtype(as,env,new_inst[j],arg,relation) then
+            if not subtype(assume,env,new_inst[j],arg,relation) then
               return false
             end
           elseif variance == "Contravariant" then
-            if not subtype(as,env,arg,new_inst[j],relation) then
+            if not subtype(assume,env,arg,new_inst[j],relation) then
               return false
             end            
           elseif variance == "Invariant" then
-            if not (subtype(as,env,arg,new_inst[j],relation) and 
-                    subtype(as,env,new_inst[j],arg,relation)) then
+            if not (subtype(assume,env,arg,new_inst[j],relation) and 
+                    subtype(assume,env,new_inst[j],arg,relation)) then
               return false
             end
           end
@@ -922,30 +956,27 @@ local function subtype_symbol (as, env, t1, t2, relation)
   
   if t1_symbol and ti1.tag == "TINominal" and ti1[2].tag == "KProper" then
     --there is no type polymorphism, so we can allow equirecursive structural subtyping
-    return subtype(as, env, ti1[1], t2)
+    return subtype(assume, env, ti1[1], t2)
   end
   
-  assert(false)
   return false
 end
 
-local function subtype_variable()
-
-local function subtype_tuple (as, env, t1, t2, relation)
+local function subtype_tuple (assume, env, t1, t2, relation)
   if tltype.isTuple(t1) and tltype.isTuple(t2) then
     local len1, len2 = #t1, #t2
     if len1 < len2 then
       if not tltype.isVararg(t1[len1]) then return false end
       local i = 1
       while i < len1 do
-        if not subtype(as, env, t1[i], t2[i], relation) then
+        if not subtype(assume, env, t1[i], t2[i], relation) then
           return false
         end
         i = i + 1
       end
       local j = i
       while j <= len2 do
-        if not subtype(as, env, t1[i], t2[j], relation) then
+        if not subtype(assume, env, t1[i], t2[j], relation) then
           return false
         end
         j = j + 1
@@ -955,14 +986,14 @@ local function subtype_tuple (as, env, t1, t2, relation)
       if not tltype.isVararg(t2[len2]) then return false end
       local i = 1
       while i < len2 do
-        if not subtype(as, env, t1[i], t2[i], relation) then
+        if not subtype(assume, env, t1[i], t2[i], relation) then
           return false
         end
         i = i + 1
       end
       local j = i
       while j <= len1 do
-        if not subtype(as, env, t1[j], t2[i], relation) then
+        if not subtype(assume, env, t1[j], t2[i], relation) then
           return false
         end
         j = j + 1
@@ -970,39 +1001,39 @@ local function subtype_tuple (as, env, t1, t2, relation)
       return true
     else
       for k, v in ipairs(t1) do
-        if not subtype(as, env, t1[k], t2[k], relation) then
+        if not subtype(assume, env, t1[k], t2[k], relation) then
           return false
         end
       end
       return true
     end
-  elser
+  else
     return false
   end
 end
 
-function subtype (as, env, t1, t2, relation)
+function subtype (assume, env, t1, t2, relation)
   local key = tltype.tostring(t1) .. "@" .. tltype.tostring(t2)
-  if as[key] then return true end
-  as[key] = true
+  if assume[key] then return true end
+  assume[key] = true
   if tltype.isVoid(t1) and tltype.isVoid(t2) then
     return true
   elseif tltype.isUnionlist(t1) then
     for k, v in ipairs(t1) do
-      if not subtype(as, env, v, t2, relation) then
+      if not subtype(assume, env, v, t2, relation) then
         return false
       end
     end
     return true
   elseif tltype.isUnionlist(t2) then
     for k, v in ipairs(t2) do
-      if subtype(as, env, t1, v, relation) then
+      if subtype(assume, env, t1, v, relation) then
         return true
       end
     end
     return false
   elseif tltype.isTuple(t1) and tltype.isTuple(t2) then
-    return subtype_tuple(as, env, t1, t2, relation)
+    return subtype_tuple(assume, env, t1, t2, relation)
   elseif tltype.isTuple(t1) and not tltype.isTuple(t2) then
     return false
   elseif not tltype.isTuple(t1) and tltype.isTuple(t2) then
@@ -1010,26 +1041,24 @@ function subtype (as, env, t1, t2, relation)
   elseif tltype.isVararg(t1) and tltype.isVararg(t2) then
     local t1_nil = tltype.Union(t1[1], tltype.Nil())
     local t2_nil = tltype.Union(t2[1], tltype.Nil())
-    return subtype(as, env, t1_nil, t2_nil, relation)
+    return subtype(assume, env, t1_nil, t2_nil, relation)
   elseif tltype.isVararg(t1) and not tltype.isVararg(t2) then
     local t1_nil = tltype.Union(t1[1], tltype.Nil())
-    return subtype(as,env, t1_nil, t2, relation)
+    return subtype(assume,env, t1_nil, t2, relation)
   elseif not tltype.isVararg(t1) and tltype.isVararg(t2) then
     local t2_nil = tltype.Union(t2[1], tltype.Nil())
-    return subtype(as,env, t1, t2_nil, relation)
+    return subtype(assume,env, t1, t2_nil, relation)
   else
-    return subtype_literal(as, env, t1, t2) or
-           subtype_base(as, env, t1, t2) or
-           subtype_nil(as, env, t1, t2) or
-           subtype_top(as, env, t1, t2) or
-           subtype_any(as, env, t1, t2, relation) or
-           subtype_self(as, env, t1, t2) or
-           subtype_union(as, env, t1, t2, relation) or
-           subtype_function(as, env, t1, t2, relation) or
-           subtype_table(as, env, t1, t2, relation) or
-           subtype_symbol(as, env, t1, t2) or
-           subtype_global_variable(as, env, t1, t2, relation) or
-           subtype_recursive(as, env, t1, t2, relation)
+    return subtype_literal(assume, env, t1, t2) or
+           subtype_base(assume, env, t1, t2) or
+           subtype_nil(assume, env, t1, t2) or
+           subtype_top(assume, env, t1, t2) or
+           subtype_any(assume, env, t1, t2, relation) or
+           subtype_self(assume, env, t1, t2) or
+           subtype_union(assume, env, t1, t2, relation) or
+           subtype_function(assume, env, t1, t2, relation) or
+           subtype_table(assume, env, t1, t2, relation) or
+           subtype_symbol(assume, env, t1, t2)
   end
 end
 
@@ -1205,14 +1234,6 @@ local function type2str (t, n)
     return "{" .. table.concat(l, ", ") .. "}"
   elseif tltype.isSymbol(t) then
     return t[1]
-  elseif tltype.isGlobalVariable(t) then
-    if t[5] then
-      return t[5] .. "." .. t[1]
-    else
-      return t[1]
-    end
-  elseif tltype.isRecursive(t) then
-    return t[1] .. "." .. type2str(t[2], n-1)
   elseif tltype.isVoid(t) then
     return "(void)"
   elseif tltype.isTuple(t) then
