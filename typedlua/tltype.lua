@@ -196,53 +196,61 @@ end
 
 -- Union : (type*) -> (type)
 function tltype.Union (...)
-  return { tag = "TUnion", ... }
+  local elements = { ... }
+  if #elements == 1 then
+    return elements[1]
+  else
+    return { tag = "TUnion", ... }
+  end
 end
 
-function tltype.simplifyUnion(env, t)
-  assert(t.tag == "TUnion")
-  local l1 = t
-  -- remove unions of unions
-  local l2 = {}
-  for i = 1, #l1 do
-    if tltype.isUnion(l1[i]) then
-      for j = 1, #l1[i] do
-        table.insert(l2, l1[i][j])
+function tltype.simplifyUnion (env, t)
+  if t.tag == "TUnion" then
+    local l1 = t
+    -- remove unions of unions
+    local l2 = {}
+    for i = 1, #l1 do
+      if tltype.isUnion(l1[i]) then
+        for j = 1, #l1[i] do
+          table.insert(l2, l1[i][j])
+        end
+      else
+        table.insert(l2, l1[i])
       end
+    end
+    -- remove duplicated types
+    local l3 = {}
+    for i = 1, #l2 do
+      local enter = true
+      for j = i + 1, #l2 do
+        if tltype.subtype(env, l2[i], l2[j]) and tltype.subtype(env, l2[j], l2[i]) then
+          enter = false
+          break
+        end
+      end
+      if enter then table.insert(l3, l2[i]) end
+    end
+    -- simplify union, TODO: this seems broken, as (Any -> Any | Any -> Any) would incorrectly simplify to Any
+    local ret = { tag = "TUnion" }
+    for i = 1, #l3 do
+      local enter = true
+      for j = 1, #l3 do
+        if i ~= j and tltype.consistent_subtype(env, l3[i], l3[j]) then
+          enter = false
+          break
+        end
+      end
+      if enter then table.insert(ret, l3[i]) end
+    end
+    if #ret == 0 then
+      return tltype.Any()
+    elseif #ret == 1 then
+      return ret[1]
     else
-      table.insert(l2, l1[i])
+      return ret
     end
-  end
-  -- remove duplicated types
-  local l3 = {}
-  for i = 1, #l2 do
-    local enter = true
-    for j = i + 1, #l2 do
-      if tltype.subtype(env, l2[i], l2[j]) and tltype.subtype(env, l2[j], l2[i]) then
-        enter = false
-        break
-      end
-    end
-    if enter then table.insert(l3, l2[i]) end
-  end
-  -- simplify union, TODO: this seems broken, as (Any -> Any | Any -> Any) would incorrectly simplify to Any
-  local ret = { tag = "TUnion" }
-  for i = 1, #l3 do
-    local enter = true
-    for j = 1, #l3 do
-      if i ~= j and tltype.consistent_subtype(env, l3[i], l3[j]) then
-        enter = false
-        break
-      end
-    end
-    if enter then table.insert(ret, l3[i]) end
-  end
-  if #ret == 0 then
-    return tltype.Any()
-  elseif #ret == 1 then
-    return ret[1]
   else
-    return ret
+    return t
   end
 end
 
@@ -387,8 +395,8 @@ end
 
 -- function types
 
--- Function : (type, type, true?) -> (type)
-function tltype.Function (t1, t2, is_method)
+-- Function : ({tpars}, type, type, true?) -> (type)
+function tltype.Function (tparams, t1, t2, is_method)
   if is_method then
     if tltype.isVoid(t1) then
       t1 = tltype.Tuple({ tltype.Self() })
@@ -396,7 +404,7 @@ function tltype.Function (t1, t2, is_method)
       table.insert(t1, 1, tltype.Self())
     end
   end
-  return { tag = "TFunction", [1] = t1, [2] = t2 }
+  return { tag = "TFunction", [1] = t1, [2] = t2, [3] = tparams }
 end
 
 function tltype.isFunction (t)
@@ -413,6 +421,7 @@ function tltype.isMethod (t)
     return false
   end
 end
+
 
 -- table types
 
@@ -535,7 +544,7 @@ end
 --type substitution
 
 function tltype.unfold (env, t)
-  if tltype.isSymbol(t) then
+  if t.tag == "TSymbol" then
     local ti = tlst.get_typeinfo(env,t[1])
     if ti.tag == "TIUserdata" then
       return ti[1]
@@ -643,9 +652,14 @@ local function substitute(t,x,s)
     end
     return tltype.UnionList(res)  
   elseif t.tag == "TFunction" then
-    local t1_res = substitute(t[1],x,s)
-    local t2_res = substitute(t[2],x,s)
-    return tltype.Function(t1_res,t2_res)
+    local tin_res = substitute(t[1],x,s)
+    local tout_res = substitute(t[2],x,s)
+    local tparams_res = {}
+    for i,tparam in t[3] do
+      local pos, name, variance, bound = tparam.pos, tparam[1], tparam[2], tparam[3]
+      table.insert(tparams_res, tlast.tpar(pos,name,variance,bound))
+    end
+    return tltype.Function(tparams_res, tin_res, tout_res)
   elseif t.tag == "TField" then
     return { tag = "TField", const = t.is_const, [1] = substitute(t[1],x,s), [2] = substitute(t[2],x,s) }
   elseif t.tag == "TTable" then
@@ -1092,7 +1106,12 @@ function tltype.general (t)
     end
     return tltype.Union(table.unpack(l))
   elseif tltype.isFunction(t) then
-    return tltype.Function(tltype.general(t[1]), tltype.general(t[2]))
+    local tparams_gen = {}
+    for i,tparam in ipairs(t[3]) do
+      local pos,name,variance,bound = tparam.pos, tparam[1], tparam[2], tparam[3]
+      table.insert(tparams_gen, tlast.tparam(pos,name,variance,tltype.general(bound)))
+    end
+    return tltype.Function(tparams_gen, tltype.general(t[1]), tltype.general(t[2]))
   elseif tltype.isTable(t) then
     local l = {}
     for k, v in ipairs(t) do

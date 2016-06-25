@@ -92,7 +92,7 @@ local G = lpeg.P { "TypedLua";
   ValueType = tllexer.token("value", "Type") / tltype.Value;
   AnyType = tllexer.token("any", "Type") / tltype.Any;
   SelfType = tllexer.token("self", "Type") / tltype.Self;
-  FunctionType = lpeg.V("InputType") * tllexer.symb("->") * lpeg.V("NilableTuple") /
+  FunctionType = (lpeg.V("InvTypeParams"))^0 * lpeg.V("InputType") * tllexer.symb("->") * lpeg.V("NilableTuple") /
                  tltype.Function;
   MethodType = lpeg.V("InputType") * tllexer.symb("=>") * lpeg.V("NilableTuple") *
                lpeg.Cc(true) / tltype.Function;
@@ -125,7 +125,8 @@ local G = lpeg.P { "TypedLua";
   ArrayType = lpeg.Carg(3) * lpeg.V("FieldType") / tltype.ArrayField;
   KeyType = lpeg.V("BaseType") + lpeg.V("ValueType") + lpeg.V("AnyType");
   FieldType = lpeg.V("Type") * lpeg.Cc(tltype.Nil()) / tltype.Union;
-  TypeArgs = tllexer.symb('<') * lpeg.V("Type") * (tllexer.symb(",") * lpeg.V("Type"))^0 * tllexer.symb('>');
+  TypeArgs = lpeg.Ct(tllexer.symb('<') * lpeg.V("Type") * (tllexer.symb(",") * lpeg.V("Type"))^0 * 
+                     tllexer.symb('>'));
   VariableType = tllexer.token(tllexer.Name, "Type") * 
                  lpeg.Ct(lpeg.V("TypeArgs")^-1) / tltype.Symbol;
   RetType = lpeg.V("NilableTuple") +
@@ -178,10 +179,32 @@ local G = lpeg.P { "TypedLua";
   ClassElement = lpeg.V("ClassConcreteFieldDef") + lpeg.V("ClassAbstractFieldDef") + 
                  lpeg.V("ClassConstructor") + lpeg.V("ClassFinalizer") + 
                  lpeg.V("ClassAbstractMethodDef") + lpeg.V("ClassConcreteMethodDef");
-             
+    
+  TypeVariance = (tllexer.symb("+") * lpeg.Cc("Covariant")) +
+                 (tllexer.symb("-") * lpeg.Cc("Contravariant")) +
+                 lpeg.Cc("Invariant");
+    
+  TypeParam = lpeg.Cp() * lpeg.V("TypeVariance") * tllexer.token(tllexer.Name, "Name") * 
+              (tllexer.symb("<:") * lpeg.V("Type"))^-1 / tlast.tpar;  
+  
+  InvTypeParam = lpeg.Cp() * lpeg.Cc("Invariant") * tllexer.token(tllexer.Name, "Name") * 
+                 (tllexer.symb("<:") * lpeg.V("Type"))^-1 / tlast.tpar;
+  
+  TypeParams = tllexer.symb("<") * 
+               lpeg.Ct( lpeg.V("TypeParam") * (tllexer.symb(",") * lpeg.V("TypeParam"))^0 ) * 
+               tllexer.symb(">");
+                  
+  InvTypeParams = tllexer.symb("<") * 
+                  lpeg.Ct( lpeg.V("InvTypeParam") * (tllexer.symb(",") * lpeg.V("TypeParam"))^0 ) * 
+                  tllexer.symb(">");
+                  
   ClassDecStat = lpeg.Cp() * 
                  (tllexer.kw("abstract") * lpeg.Cc(true) + lpeg.Cc(false)) * 
-                 tllexer.kw("class") * lpeg.V("Id") * (tllexer.kw("extends") * lpeg.V("Id") + lpeg.Cc("NoParent")) *
+                 tllexer.kw("class") * lpeg.V("Id") * (lpeg.V("TypeParams") + lpeg.Cc({})) * 
+                 (tllexer.kw("extends") * 
+                  lpeg.V("Id") * 
+                  (lpeg.V("TypeArgs") + lpeg.Cc("NoArgs")) + 
+                  lpeg.Cc("NoParent") * lpeg.Cc("NoArgs")) *
                  lpeg.Ct(lpeg.V("ClassElement")^0) * tllexer.kw("end") / tlast.statClass;
              
   -- parser
@@ -272,7 +295,8 @@ local G = lpeg.P { "TypedLua";
                 (lpeg.Cp() * lpeg.Cg(tllexer.symb(":") *
                    (lpeg.Cp() * tllexer.token(tllexer.Name, "Name") / tlast.exprString) *
                    lpeg.V("FuncArgs"))) / tlast.invoke +
-                (lpeg.Cp() * lpeg.V("FuncArgs")) / tlast.call)^0, tlast.exprSuffixed);
+                (lpeg.Cp() * (lpeg.V("TypeArgs") + lpeg.Cc(false)) * 
+                              lpeg.V("FuncArgs")) / tlast.call)^0, tlast.exprSuffixed);
   PrimaryExp = lpeg.V("Var") +
                lpeg.Cp() * tllexer.symb("(") * lpeg.V("Expr") * tllexer.symb(")") / tlast.exprParen;
   SuperInvoke = lpeg.Cp() * tllexer.kw("super") * tllexer.symb(":") * 
@@ -308,7 +332,7 @@ local G = lpeg.P { "TypedLua";
             lpeg.Cp() / tlast.parList0;
   TypedVarArg = lpeg.Cp() * tllexer.symb("...") * (tllexer.symb(":") * lpeg.V("Type"))^-1 /
                 tlast.identDots;
-  FuncBody = lpeg.Cp() * tllexer.symb("(") * lpeg.V("ParList") * tllexer.symb(")") *
+  FuncBody = lpeg.Cp() * (lpeg.V("InvTypeParams") + lpeg.Cc(false)) * tllexer.symb("(") * lpeg.V("ParList") * tllexer.symb(")") *
              (tllexer.symb(":") * lpeg.V("RetType"))^-1 *
              lpeg.V("Block") * tllexer.kw("end") / tlast.exprFunction;
   FuncStat = lpeg.Cp() * (tllexer.kw("const") * lpeg.Cc(true) + lpeg.Cc(false)) *
@@ -418,7 +442,7 @@ end
 local function traverse_call (env, call)
   local status, msg = traverse_exp(env, call[1])
   if not status then return status, msg end
-  for i=2, #call do
+  for i=3, #call do
     status, msg = traverse_exp(env, call[i])
     if not status then return status, msg end
   end

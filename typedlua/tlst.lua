@@ -227,6 +227,20 @@ function tlst.set_local (env, id)
   env[scope]["unused"][local_name] = id
 end
 
+-- set_tsuper : (env,type?) -> ()
+function tlst.set_tsuper(env,t)
+  env[env.scope].tsuper = t
+end
+
+-- get_tsuper : (env) -> (type?)
+function tlst.get_tsuper(env)
+  for s = scope, 1, -1 do
+    local t = env[s].tsuper
+    if t then return t end
+  end
+  return nil
+end
+
 -- get_local : (env, string) -> (id)
 function tlst.get_local (env, local_name)
   local scope = env.scope

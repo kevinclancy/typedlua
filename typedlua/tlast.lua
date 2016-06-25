@@ -217,9 +217,9 @@ function tlast.statInterface (pos, name, t)
   return { tag = "Interface", pos = pos, [1] = name, [2] = t }
 end
 
---statClass : (number, boolean, string, class|"NoParent", class_element_array, ident) -> (stat)
-function tlast.statClass(pos,isAbstract,name,superclass,elems)
-  return { tag = "Class", pos = pos, [1] = name, [2] = isAbstract, [3] = elems, [4] = superclass } 
+--statClass : (number, boolean, string, {tpar}|"NoParams", class|"NoParent", {Type}|"NoArgs", class_element_array, ident) -> (stat)
+function tlast.statClass(pos,isAbstract,name,tpars,superclass,superargs,elems)
+  return { tag = "Class", pos = pos, [1] = name, [2] = isAbstract, [3] = elems, [4] = superclass, [5] = tpars, [6] = superargs} 
 end
 
 -- statUserdata : (number, string, type) -> (stat)
@@ -288,6 +288,13 @@ function tlast.parList2 (pos, namelist, vararg)
   return namelist
 end
 
+--type parameters
+
+-- tpar : (number, string, string, type?) -> (tpar)
+function tlast.tpar (pos, str, variance, tbound)
+  return { tag = "TypeParam", pos = pos, [1] = str, [2] = variance, [3] = tbound }
+end
+
 -- fieldlist
 
 -- fieldPair : (number, expr, expr) -> (field)
@@ -327,9 +334,9 @@ function tlast.exprString (pos, str)
   return { tag = "String", pos = pos, [1] = str }
 end
 
--- exprFunction : (number, parlist, type|stat, stat?) -> (expr)
-function tlast.exprFunction (pos, parlist, rettype, stat)
-  return { tag = "Function", pos = pos, [1] = parlist, [2] = rettype, [3] = stat }
+-- exprFunction : (number, tparlist, parlist, type|stat, stat?) -> (expr)
+function tlast.exprFunction (pos, tparlist, parlist, rettype, stat)
+  return { tag = "Function", pos = pos, [1] = parlist, [2] = rettype, [3] = stat, [4] = tparlist }
 end
 
 -- exprTable : (number, field*) -> (expr)
@@ -432,11 +439,11 @@ end
 -- apply
 
 -- call : (number, expr, expr*) -> (apply)
-function tlast.call (pos, e1, ...)
-  local a = { tag = "Call", pos = pos, [1] = e1 }
+function tlast.call (pos, e1, targs, ...)
+  local a = { tag = "Call", pos = pos, [1] = e1, [2] = targs}
   local list = { ... }
   for i = 1, #list do
-    a[i + 1] = list[i]
+    a[i + 3] = list[i]
   end
   return a
 end
