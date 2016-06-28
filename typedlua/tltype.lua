@@ -1254,9 +1254,11 @@ local function type2str (t, n)
     --if t.interface then return t.interface end
     local l = {}
     for k, v in ipairs(t) do
-      l[k] = type2str(v[1], n-1) .. ":" .. type2str(v[2], n-1)
-      if tltype.isConstField(v) then
-        l[k] = "const " .. l[k]
+      if not v.missing then
+        l[k] = type2str(v[1], n-1) .. ":" .. type2str(v[2], n-1)
+        if tltype.isConstField(v) then
+          l[k] = "const " .. l[k]
+        end
       end
     end
     return "{" .. table.concat(l, ", ") .. "}"

@@ -1747,7 +1747,9 @@ local function check_constructor (env, elem, instance_members, parent_members, p
     tself[#tself + 1] = v
   end
   for k,v in pairs(instance_members) do
-    tself[#tself + 1] = v
+    if not parent_members[k] then
+      tself[#tself + 1] = v
+    end
   end
   for _,field in ipairs(tself) do
     assert(tltype.isStr(field[1]))
@@ -2093,13 +2095,13 @@ local function get_class_types(env, stm)
   local instance_members = {}
   for k,v in pairs(superclass_members) do 
     if not members[k] then
-      instance_members[#instance_members + 1] = v 
+      instance_members[k] = v 
     end
   end
   local instance_methods = {}
   for k,v in pairs(superclass_methods) do 
     if not methods[k] then
-      instance_methods[#instance_methods + 1] = v 
+      instance_methods[k] = v 
     end
   end
   local instance_fields = {}
