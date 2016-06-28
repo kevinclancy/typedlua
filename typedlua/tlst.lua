@@ -79,7 +79,7 @@ function tlst.get_nominal_edges (env, tisource, tidest, array_out)
     local tpars = tisource[2]
     for _,tpar in ipairs(tpars) do
       local parname = tpar[1]
-      targs[#targs + 1] = { tag = "TSymbol", [1] = parname }
+      targs[#targs + 1] = { tag = "TSymbol", [1] = parname, [2] = {} }
     end
     array_out[#array_out + 1] = { path = {}, inst = targs }
     return

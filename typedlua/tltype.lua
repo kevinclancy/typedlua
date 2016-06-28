@@ -535,7 +535,7 @@ end
 
 -- Variable : (string,{type}?) -> (type)
 function tltype.Symbol (name,args)
-  return { tag = "TSymbol", [1] = name, [2] = args }
+  return { tag = "TSymbol", [1] = name, [2] = args or {} }
 end
 
 -- isVariable : (type) -> (boolean)

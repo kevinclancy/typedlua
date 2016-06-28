@@ -118,7 +118,7 @@ local function kindcheck (env, t)
         else
           for i,tpar in ipairs(tpars) do
             local bound = tpar[3]
-            if not tltype.subtype(env, args[i], bound) then
+            if not (bound == "NoBound" or tltype.subtype(env, args[i], bound)) then
               local msg = string.format("%s is not a subtype of %s", tltype.tostring(args[i]), tltype.tostring(bound))
               typeerror(env, "kind", msg, args[i].pos)
             end
