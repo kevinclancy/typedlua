@@ -76,8 +76,7 @@ function tlst.get_nominal_edges (env, tisource, tidest, array_out)
   assert(tisource.tag == "TINominal" and tidest.tag == "TINominal")
   if tisource == tidest then
     local targs = {}
-    local ksource = tisource[2]
-    local tpars = ksource[1]
+    local tpars = tisource[2]
     for _,tpar in ipairs(tpars) do
       local parname = tpar[1]
       targs[#targs + 1] = { tag = "TSymbol", [1] = parname }

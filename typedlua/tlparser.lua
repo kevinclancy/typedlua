@@ -187,7 +187,7 @@ local G = lpeg.P { "TypedLua";
   TypeParam = lpeg.Cp() * lpeg.V("TypeVariance") * tllexer.token(tllexer.Name, "Name") * 
               (tllexer.symb("<:") * lpeg.V("Type"))^-1 / tlast.tpar;  
   
-  InvTypeParam = lpeg.Cp() * lpeg.Cc("Invariant") * tllexer.token(tllexer.Name, "Name") * 
+  InvTypeParam = lpeg.Cp() * lpeg.Cc("Invariant") * tllexer.token(tllexer.Name, "Name") *
                  (tllexer.symb("<:") * lpeg.V("Type"))^-1 / tlast.tpar;
   
   TypeParams = tllexer.symb("<") * 

@@ -548,7 +548,7 @@ end
 
 -- substitute : (type,var,type)
 -- replace x with s in t
-function tltype.substitute(t,x,s)
+function tltype.substitute (t,x,s)
   if t.tag == "TLiteral" then
     return t
   elseif t.tag == "TBase" then
@@ -569,8 +569,8 @@ function tltype.substitute(t,x,s)
       res[i] = tltype.substitute(t[i],x,s)
     end
     return tltype.Union(res)
-  elseif t.tag == "TVarArg" then
-    return tltype.VarArg(substitute(t[1],x,s))
+  elseif t.tag == "TVararg" then
+    return tltype.Vararg(tltype.substitute(t[1],x,s))
   elseif t.tag == "TTuple" then
     local res = { tag = "TTuple" }
     for i, tuple_element in ipairs(t) do
@@ -587,7 +587,7 @@ function tltype.substitute(t,x,s)
     local tin_res = tltype.substitute(t[1],x,s)
     local tout_res = tltype.substitute(t[2],x,s)
     local tparams_res = {}
-    for i,tparam in t[3] do
+    for i,tparam in pairs(t[3]) do
       local pos, name, variance, bound = tparam.pos, tparam[1], tparam[2], tparam[3]
       table.insert(tparams_res, tlast.tpar(pos,name,variance,bound))
     end
@@ -599,7 +599,7 @@ function tltype.substitute(t,x,s)
     for i,field in ipairs(t) do
       res[i] = tltype.substitute(t[i],x,s)
     end
-    return tltype.Table(res)      
+    return tltype.Table(table.unpack(res))      
   elseif t.tag == "TSymbol" then
     local name,args = t[1],t[2]
     
@@ -633,7 +633,7 @@ function tltype.unfold (env, t)
     elseif ti.tag == "TINominal" then
       local params = ti[2]
       local args = t[2]
-      if args and #params == #args then
+      if #params == #args then
         local res = ti[1]
         for i=1,#args do
           res = tltype.substitute(res,params[i][1],args[i])
@@ -898,7 +898,11 @@ local function subtype_symbol (assume, env, t1, t2, relation)
   
   -- handle bounded variables
   if t1_symbol and ti1.tag == "TIVariable" then
-    return subtype(assume, env, ti1[1], t2, relation)  
+    if ti1[1] == "NoBound" then
+      return ti1 == ti2
+    else
+      return subtype(assume, env, ti1[1], t2, relation)  
+    end
   end
   
   if t2_symbol and ti2.tag == "TIVariable" then
@@ -928,11 +932,9 @@ local function subtype_symbol (assume, env, t1, t2, relation)
     local nominal_edges = {}
     tlst.get_nominal_edges(env,ti1,ti2,nominal_edges)
     
-    local k1 = ti1[2]
-    local k2 = ti2[2]
-    local pars1 = k1[1]
-    local pars2 = k2[1]
-    
+    local pars1 = ti1[2]
+    local pars2 = ti2[2]
+
     for _,edge in ipairs(nominal_edges) do
       local path = edge.path
       local inst = edge.inst

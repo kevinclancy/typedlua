@@ -291,8 +291,8 @@ end
 --type parameters
 
 -- tpar : (number, string, string, type?) -> (tpar)
-function tlast.tpar (pos, str, variance, tbound)
-  return { tag = "TypeParam", pos = pos, [1] = str, [2] = variance, [3] = tbound }
+function tlast.tpar (pos, variance, str, tbound)
+  return { tag = "TypeParam", pos = pos, [1] = str, [2] = variance, [3] = tbound or "NoBound" }
 end
 
 -- fieldlist

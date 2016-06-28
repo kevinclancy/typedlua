@@ -110,27 +110,27 @@ local function kindcheck (env, t)
       typeerror(env, "kind", msg, t.pos)
     else
       if ti.tag == "TINominal" then
-        local k = ti[2]
-        local bounds = k[2]
-        local variances = k[2]
+        local tpars = ti[2]
         
-        if #bounds ~= #args then
-          local msg = string.format("%s expected %d arguments but received %d",name,#bounds,#args)
+        if #tpars ~= #args then
+          local msg = string.format("%s expected %d arguments but received %d",name,#tpars,#args)
           typeerror(env, "kind", msg, t.pos)
         else
-          for i,bound in ipairs(bounds) do
+          for i,tpar in ipairs(tpars) do
+            local bound = tpar[3]
             if not tltype.subtype(env, args[i], bound) then
               local msg = string.format("%s is not a subtype of %s", tltype.tostring(args[i]), tltype.tostring(bound))
               typeerror(env, "kind", msg, args[i].pos)
             end
             
-            if variances[i] == "Covariant" then
+            local variance = tpar[2]
+            if variance == "Covariant" then
               kindcheck(env,args[i])
-            elseif variances[i] == "Contravariant" then
+            elseif variance == "Contravariant" then
               env.variance = env.variance * -1
               kindcheck(env,args[i])
               env.variance = env.variance * -1
-            elseif variances[i] == "Invariant" then
+            elseif variance == "Invariant" then
               local orig_variance = env.variance
               env.variance = 0
               kindcheck(env,args[i])
@@ -159,6 +159,8 @@ local function kindcheck (env, t)
         end        
       end
     end
+  elseif t.tag == "TVararg" then
+    kindcheck(env, t[1])
   else
     assert("type substitution error: expected type, got " .. t.tag) 
   end  
@@ -2089,11 +2091,23 @@ local function get_class_types(env, stm)
   end
   
   local instance_members = {}
-  for k,v in pairs(superclass_members) do instance_members[#instance_members + 1] = v end
+  for k,v in pairs(superclass_members) do 
+    if not members[k] then
+      instance_members[#instance_members + 1] = v 
+    end
+  end
   local instance_methods = {}
-  for k,v in pairs(superclass_methods) do instance_methods[#instance_methods + 1] = v end
+  for k,v in pairs(superclass_methods) do 
+    if not methods[k] then
+      instance_methods[#instance_methods + 1] = v 
+    end
+  end
   local instance_fields = {}
-  for k,v in pairs(superclass_fields) do instance_fields[#instance_fields + 1] = v end
+  for k,v in pairs(superclass_fields) do 
+    if (not members[k]) and (not methods[k]) then
+      instance_fields[#instance_fields + 1] = v
+    end
+  end
   
   for k,member in pairs(members) do      
     if superclass_fields[k] then
@@ -2152,7 +2166,7 @@ local function get_class_types(env, stm)
   
   local t_premethods = tltype.Table()
   for _,field in pairs(instance_methods) do 
-    t_premethods[#t_premethods + 1] = premethod_from_method(field,t_instance) 
+    t_premethods[#t_premethods + 1] = premethod_from_method(field,tltype.Symbol(name[1],t_params)) 
   end
   
   local t_class = tltype.Table(table.unpack(class_constructors))
@@ -2179,9 +2193,9 @@ local function check_inheritance_clause (env, superclass, superargs)
   local supername = tsuperobject[1]
   local tisuperobject = tlst.get_typeinfo(env, tsuperobject[1])
   assert(tisuperobject.tag == "TINominal")
-  local ksuperargs = tisuperobject[2]
+  local superparams = tisuperobject[2]
                      
-  if #ksuperargs ~= #superargs then
+  if #superparams ~= #superargs then
     local msg = "class %s expects %d type arguments but was supplied %d"
     msg = string.format(msg,tsuperobject[1],#ksuperargs,#superargs)
     typeerror(env, "kind", msg, superclass.pos)
@@ -2190,7 +2204,7 @@ local function check_inheritance_clause (env, superclass, superargs)
   
   local orig_variance = env.variance
   for i,superarg in ipairs(superargs) do
-    local variance = ksuper[2][i]
+    local variance = superparams[i]
     if variance == "Contravariant" then
       env.variance = -1
     elseif variance == "Invariant" then
@@ -2237,7 +2251,7 @@ local function new_check_class (env, stm)
   for i,tpar in ipairs(t_params) do
     local name, variance, tbound = tpar[1], tpar[2], tpar[3]
     local ti = tlst.typeinfo_Variable(tbound, variance)
-    env.set_typeinfo(env, name, ti, true)
+    tlst.set_typeinfo(env, name, ti, true)
   end
   
   --check that bounds are well-kinded
@@ -2245,7 +2259,7 @@ local function new_check_class (env, stm)
   env.variance = -1
   for i,tpar in ipairs(t_params) do
     local name, variance, tbound = tpar[1], tpar[2], tpar[3]
-    if not kindcheck_success(env, tbound) then
+    if not (tbound == "NoBound" or kindcheck_success(env, tbound)) then
       env.variance = orig_variance
       tlst.end_scope(env)
       return false
@@ -2289,7 +2303,8 @@ local function new_check_class (env, stm)
     else
       tlst.set_tsuper(env, "None")
     end
-    check_class_code(env, elems, t_instance, instance_members, superclass_members, superclass)
+    local t_instance_symbol = tltype.Symbol(name[1], t_params)
+    check_class_code(env, elems, t_instance_symbol, instance_members, superclass_members, superclass)
     
     --pop off the portion of the environment containing type parameters
     tlst.end_scope(env)
@@ -2437,12 +2452,12 @@ local function check_class (env, stm)
     t_instance.fixed = true
     t_instance.name = name[1]
     
-    local t_instance_symbol = tltype.Symbol()
+    local t_instance_symbol = tltype.Symbol(name[1], t_params)
     
     for _,elem in ipairs(elems) do
       if elem.tag == "ConcreteClassMethod" then
         local name,parlist,tret,body = elem[1], elem[2], elem[3], elem[4]
-        check_method(env,parlist,tret,body,t_instance,elem.pos)
+        check_method(env,parlist,tret,body,t_instance_symbol,elem.pos)
       elseif elem.tag == "ClassConstructor" then
         check_constructor(env, elem, instance_members, superclass_members, superclass)
       elseif elem.tag == "ClassFinalizer" then
