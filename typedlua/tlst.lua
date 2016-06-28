@@ -39,18 +39,18 @@ end
 -- typeinfo constructors --
 
 -- (string,type) -> (typeinfo)
-function tlst.typeinfo_Userdata (name, t)
+function tlst.typeinfo_Userdata (t)
   return { tag = "TIUserdata", [1] = t }
 end
 
 -- (string,type) -> (typeinfo)
-function tlst.typeinfo_Structural (name, t)
+function tlst.typeinfo_Structural (t)
   return { tag = "TIStructural", [1] = t }
 end
 
--- (string,type,kind) -> (typeinfo)
-function tlst.typeinfo_Nominal (name, t, k)
-  return { tag = "TINominal", [1] = t, [2] = k }
+-- (string,type,{tpar}) -> (typeinfo)
+function tlst.typeinfo_Nominal (name, t, tpars)
+  return { tag = "TINominal", name = name, [1] = t, [2] = tpars}
 end
 
 -- (type) -> (typeinfo)
@@ -73,6 +73,19 @@ end
 
 -- get_nominal_edges : (env,typeinfo,typeinfo,out {{type}}) -> ()
 function tlst.get_nominal_edges (env, tisource, tidest, array_out)
+  assert(tisource.tag == "TINominal" and tidest.tag == "TINominal")
+  if tisource == tidest then
+    local targs = {}
+    local ksource = tisource[2]
+    local tpars = ksource[1]
+    for _,tpar in ipairs(tpars) do
+      local parname = tpar[1]
+      targs[#targs + 1] = { tag = "TSymbol", [1] = parname }
+    end
+    array_out[#array_out + 1] = { path = {}, inst = targs }
+    return
+  end
+  
   for i,_ in ipairs(array_out) do array_out[i] = nil end
   local scope = env.scope
   for s = scope, 1, -1 do
@@ -89,24 +102,22 @@ end
 
 -- (env, string, string, {type}, (type, string, type) -> (type)) -> ()
 function tlst.add_nominal_edge (env, source, dest, instantiation, subst)
-  local scope = env.scope
+  local s = env.scope
   
   local ti_source = tlst.get_typeinfo(env,source)
   local ti_dest = tlst.get_typeinfo(env,dest)
-  assert(tisource ~= nil and ti_source.tag == "TINominal")
-  assert(tidest ~= nil and ti_dest.tag == "TINominal")
-  local ksource,kdest = ti_source.kind, ti_dest.kind
-  local dest_param_names = kdest[1]
-  assert(#instantiation == #dest_param_names)
+  assert(ti_source ~= nil and ti_source.tag == "TINominal")
+  assert(ti_dest ~= nil and ti_dest.tag == "TINominal")
+  local dest_params = ti_dest[2]
+  assert(#instantiation == #dest_params)
   
   local dest_edges = {}
   tlst.get_all_nominal_edges(env, ti_dest, dest_edges)
   
   -- add direct edge
-  if not env[s].nominal_edges[ti_source] then
-    env[s].nominal_edges[ti_source] = {}
-  end
+  env[s].nominal_edges[ti_source] = env[s].nominal_edges[ti_source] or {}
   local src_edges = env[s].nominal_edges[ti_source]
+  src_edges[ti_dest] = src_edges[ti_dest] or {}
   local src_dest_edges = src_edges[ti_dest]
   src_dest_edges[#src_dest_edges + 1] = { path = {ti_source}, inst = instantiation }
   
@@ -118,8 +129,8 @@ function tlst.add_nominal_edge (env, source, dest, instantiation, subst)
     assert(ti_parent ~= ti_source)
     
     local new_instantiation = {}
-    for i=1,#dest_param_names do 
-      local name = dest_param_names[i]
+    for i=1,#dest_params do 
+      local name = dest_params[i][1]
       local tinst = instantiation[i]
       
       local new_inst = {}
@@ -227,14 +238,14 @@ function tlst.set_local (env, id)
   env[scope]["unused"][local_name] = id
 end
 
--- set_tsuper : (env,type?) -> ()
+-- set_tsuper : (env,type|"None") -> ()
 function tlst.set_tsuper(env,t)
   env[env.scope].tsuper = t
 end
 
 -- get_tsuper : (env) -> (type?)
 function tlst.get_tsuper(env)
-  for s = scope, 1, -1 do
+  for s = env.scope, 1, -1 do
     local t = env[s].tsuper
     if t then return t end
   end

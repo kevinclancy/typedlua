@@ -39,6 +39,9 @@ end
 
 -- isLiteral : (type) -> (boolean)
 function tltype.isLiteral (t)
+  if not t then 
+    assert(false)
+  end
   return t.tag == "TLiteral"
 end
 
@@ -471,7 +474,7 @@ end
 
 --rather than getting the value that corresponds to a field,
 --get the table that represents the field
-function tltype.getFieldTable(env, k,t)
+function tltype.getFieldTable(env, k, t)
   assert(tltype.isTable(t))
   for _, v in ipairs(t) do
     if tltype.consistent_subtype(env, k, v[1]) then
@@ -543,6 +546,81 @@ end
 
 --type substitution
 
+-- substitute : (type,var,type)
+-- replace x with s in t
+function tltype.substitute(t,x,s)
+  if t.tag == "TLiteral" then
+    return t
+  elseif t.tag == "TBase" then
+    return t
+  elseif t.tag == "TNil" then
+    return t
+  elseif t.tag == "TValue" then
+    return t
+  elseif t.tag == "TAny" then
+    return t
+  elseif t.tag == "TSelf" then
+    return t
+  elseif t.tag == "TVoid" then
+    return t
+  elseif t.tag == "TUnion" then
+    local res = {}
+    for i,union_element in ipairs(t) do
+      res[i] = tltype.substitute(t[i],x,s)
+    end
+    return tltype.Union(res)
+  elseif t.tag == "TVarArg" then
+    return tltype.VarArg(substitute(t[1],x,s))
+  elseif t.tag == "TTuple" then
+    local res = { tag = "TTuple" }
+    for i, tuple_element in ipairs(t) do
+      res[i] = tltype.substitute(t[i],x,s)
+    end
+    return res
+  elseif t.tag == "TUnionList" then
+    local res = {}
+    for i,union_element in ipairs(t) do
+      res[i] = tltype.substitute(t[i],x,s)
+    end
+    return tltype.UnionList(res)  
+  elseif t.tag == "TFunction" then
+    local tin_res = tltype.substitute(t[1],x,s)
+    local tout_res = tltype.substitute(t[2],x,s)
+    local tparams_res = {}
+    for i,tparam in t[3] do
+      local pos, name, variance, bound = tparam.pos, tparam[1], tparam[2], tparam[3]
+      table.insert(tparams_res, tlast.tpar(pos,name,variance,bound))
+    end
+    return tltype.Function(tparams_res, tin_res, tout_res)
+  elseif t.tag == "TField" then
+    return { tag = "TField", const = t.is_const, [1] = tltype.substitute(t[1],x,s), [2] = tltype.substitute(t[2],x,s) }
+  elseif t.tag == "TTable" then
+    local res = {}
+    for i,field in ipairs(t) do
+      res[i] = tltype.substitute(t[i],x,s)
+    end
+    return tltype.Table(res)      
+  elseif t.tag == "TSymbol" then
+    local name,args = t[1],t[2]
+    
+    if name == x then
+      assert(#args == 0)
+      return s
+    elseif #args > 0 then
+      local new_args = {}
+      for i,arg in ipairs(args) do
+        new_args[i] = tltype.substitute(arg,x,s)
+      end
+      return tltype.Symbol(name,new_args)
+    else
+      return t
+    end
+  else
+    assert("type substitution error: expected type, got " .. t.tag) 
+  end
+end
+
+
 function tltype.unfold (env, t)
   if t.tag == "TSymbol" then
     local ti = tlst.get_typeinfo(env,t[1])
@@ -553,16 +631,15 @@ function tltype.unfold (env, t)
     elseif ti.tag == "TIVariable" then
       return ti[1]
     elseif ti.tag == "TINominal" then
-      local k = ti[2]
+      local params = ti[2]
       local args = t[2]
-      local param_names = k[1]
-      if args and #param_names == #args then
+      if args and #params == #args then
         local res = ti[1]
         for i=1,#args do
-          res = tltype.substitute(res,param_names[i],args[i])
+          res = tltype.substitute(res,params[i][1],args[i])
         end
         return res
-      elseif (not args) and #param_names == 0 then
+      elseif (not args) and #params == 0 then
         return ti[1]
       else
         return tltype.Any()
@@ -614,79 +691,6 @@ function tltype.checkRecursive (t, name)
   return check_recursive(t, name)
 end
 
--- substitute : (type,var,type)
--- replace x with s in t
-local function substitute(t,x,s)
-  if t.tag == "TLiteral" then
-    return t
-  elseif t.tag == "TBase" then
-    return t
-  elseif t.tag == "TNil" then
-    return t
-  elseif t.tag == "TValue" then
-    return t
-  elseif t.tag == "TAny" then
-    return t
-  elseif t.tag == "TSelf" then
-    return t
-  elseif t.tag == "TVoid" then
-    return t
-  elseif t.tag == "TUnion" then
-    local res = {}
-    for i,union_element in ipairs(t) do
-      res[i] = substitute(t[i],x,s)
-    end
-    return tltype.Union(res)
-  elseif t.tag == "TVarArg" then
-    return tltype.VarArg(substitute(t[1],x,s))
-  elseif t.tag == "TTuple" then
-    local res = { tag = "TTuple" }
-    for i, tuple_element in ipairs(t) do
-      res[i] = substitute(t[i],x,s)
-    end
-    return res
-  elseif t.tag == "TUnionList" then
-    local res = {}
-    for i,union_element in ipairs(t) do
-      res[i] = substitute(t[i],x,s)
-    end
-    return tltype.UnionList(res)  
-  elseif t.tag == "TFunction" then
-    local tin_res = substitute(t[1],x,s)
-    local tout_res = substitute(t[2],x,s)
-    local tparams_res = {}
-    for i,tparam in t[3] do
-      local pos, name, variance, bound = tparam.pos, tparam[1], tparam[2], tparam[3]
-      table.insert(tparams_res, tlast.tpar(pos,name,variance,bound))
-    end
-    return tltype.Function(tparams_res, tin_res, tout_res)
-  elseif t.tag == "TField" then
-    return { tag = "TField", const = t.is_const, [1] = substitute(t[1],x,s), [2] = substitute(t[2],x,s) }
-  elseif t.tag == "TTable" then
-    local res = {}
-    for i,field in ipairs(t) do
-      res[i] = substitute(t[i],x,s)
-    end
-    return tltype.Table(res)      
-  elseif t.tag == "TSymbol" then
-    local name,args = t[1],t[2]
-    
-    if name == x then
-      assert(#args == 0)
-      return s
-    elseif #args > 0 then
-      local new_args = {}
-      for i,arg in ipairs(args) do
-        new_args[i] = substitute(arg,x,s)
-      end
-      return tltype.Symbol(name,new_args)
-    else
-      return t
-    end
-  else
-    assert("type substitution error: expected type, got " .. t.tag) 
-  end
-end
 
 --kinds
 
@@ -701,9 +705,8 @@ function tltype.isProperKind (k)
 end
 
 -- OperatorKind : ({string},{type},{"Covariant"|"Contravariant"|"Invariant"}) -> (kind)
-function tltype.OperatorKind (names,bounds,variances)
-  assert(#names == #bounds and #bounds == #variances)
-  return { tag = "KOperator", [1] = names, [2] = bounds, [3] = variances }
+function tltype.OperatorKind (tpars)
+  return { tag = "KOperator", [1] = tpars}
 end
 
 -- isOperatorKind : (kind) -> (boolean)
@@ -925,49 +928,53 @@ local function subtype_symbol (assume, env, t1, t2, relation)
     local nominal_edges = {}
     tlst.get_nominal_edges(env,ti1,ti2,nominal_edges)
     
-    local k1 = ti1.kind
-    local k1_names = k1[1]
-    local k2 = ti2.kind
-    local k2_variances = k1[3]
+    local k1 = ti1[2]
+    local k2 = ti2[2]
+    local pars1 = k1[1]
+    local pars2 = k2[1]
     
     for _,edge in ipairs(nominal_edges) do
       local path = edge.path
       local inst = edge.inst
       
-      assert(#inst == #k2_variances)
+      assert(#inst == #pars2)
       
       local new_inst = {}
       for i,t in ipairs(inst) do
         new_inst[i] = inst[i]
-        if ti1.args then
-          for j,arg in ipairs(ti1.args) do
-            new_inst[i] = tltype.substitute(new_inst[i],k1_names[j],arg)
-          end
+        local args1 = t1[2]
+        for j,arg in ipairs(args1) do
+          new_inst[i] = tltype.substitute(new_inst[i],pars1[j][1],arg)
         end
+      end
         
-        local variance = k2_variances[i]
-        for j,arg in ipairs(ti2.args) do
-          if variance == "Covariant" then
-            if not subtype(assume,env,new_inst[j],arg,relation) then
-              return false
-            end
-          elseif variance == "Contravariant" then
-            if not subtype(assume,env,arg,new_inst[j],relation) then
-              return false
-            end            
-          elseif variance == "Invariant" then
-            if not (subtype(assume,env,arg,new_inst[j],relation) and 
-                    subtype(assume,env,new_inst[j],arg,relation)) then
-              return false
-            end
+      local args2 = t2[2]
+      local incompatible = false
+      for i,arg in ipairs(args2) do
+        local variance = pars2[i][2]
+        if variance == "Covariant" then
+          if not subtype(assume,env,new_inst[i],arg,relation) then
+            incompatible = true
+          end
+        elseif variance == "Contravariant" then
+          if not subtype(assume,env,arg,new_inst[i],relation) then
+            incompatible = true
+          end            
+        elseif variance == "Invariant" then
+          if not (subtype(assume,env,arg,new_inst[i],relation) and 
+                  subtype(assume,env,new_inst[i],arg,relation)) then
+            incompatible = true
           end
         end
       end
-      
-      return false
+      if not incompatible then
+        return true
+      end
     end
+    
+    return false
   end
-  
+
   if t1_symbol and ti1.tag == "TINominal" and ti1[2].tag == "KProper" then
     --there is no type polymorphism, so we can allow equirecursive structural subtyping
     return subtype(assume, env, ti1[1], t2)
@@ -1085,7 +1092,7 @@ function tltype.consistent_subtype (env, t1, t2)
 end
 
 function tltype.consistent (env, t1, t2)
-  return tltype.consistent_subtype(env, t1, t2) and tltype.consistent_subtype(env, t2,t1)
+  return tltype.consistent_subtype(env, t1, t2) and tltype.consistent_subtype(env, t2, t1)
 end
 
 -- most general type

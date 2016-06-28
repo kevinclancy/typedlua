@@ -72,8 +72,8 @@ local op = { add = " + ",
 
 local function code_call (call, fmt)
   local l = {}
-  for k = 2, #call do
-    l[k - 1] = code_exp(call[k], fmt)
+  for k = 3, #call do
+    l[k - 2] = code_exp(call[k], fmt)
   end
   return code_exp(call[1], fmt) .. "(" .. table.concat(l, ",") .. ")"
 end

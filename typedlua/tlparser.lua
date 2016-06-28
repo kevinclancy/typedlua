@@ -203,8 +203,8 @@ local G = lpeg.P { "TypedLua";
                  tllexer.kw("class") * lpeg.V("Id") * (lpeg.V("TypeParams") + lpeg.Cc({})) * 
                  (tllexer.kw("extends") * 
                   lpeg.V("Id") * 
-                  (lpeg.V("TypeArgs") + lpeg.Cc("NoArgs")) + 
-                  lpeg.Cc("NoParent") * lpeg.Cc("NoArgs")) *
+                  (lpeg.V("TypeArgs") + lpeg.Cc({})) + 
+                  lpeg.Cc("NoParent") * lpeg.Cc({})) *
                  lpeg.Ct(lpeg.V("ClassElement")^0) * tllexer.kw("end") / tlast.statClass;
              
   -- parser
@@ -295,7 +295,7 @@ local G = lpeg.P { "TypedLua";
                 (lpeg.Cp() * lpeg.Cg(tllexer.symb(":") *
                    (lpeg.Cp() * tllexer.token(tllexer.Name, "Name") / tlast.exprString) *
                    lpeg.V("FuncArgs"))) / tlast.invoke +
-                (lpeg.Cp() * (lpeg.V("TypeArgs") + lpeg.Cc(false)) * 
+                (lpeg.Cp() * (lpeg.V("TypeArgs") + lpeg.Cc({})) * 
                               lpeg.V("FuncArgs")) / tlast.call)^0, tlast.exprSuffixed);
   PrimaryExp = lpeg.V("Var") +
                lpeg.Cp() * tllexer.symb("(") * lpeg.V("Expr") * tllexer.symb(")") / tlast.exprParen;

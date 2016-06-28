@@ -43,8 +43,10 @@ local G = lpeg.P { "TypedLuaDescription";
   ValueType = tllexer.token("value", "Type") / tltype.Value;
   AnyType = tllexer.token("any", "Type") / tltype.Any;
   SelfType = tllexer.token("self", "Type") / tltype.Self;
-  FunctionType = lpeg.V("InputType") * tllexer.symb("->") * lpeg.V("NilableTuple") /
-                 tltype.Function;
+  FunctionType = lpeg.Cc({}) * 
+                 lpeg.V("InputType") * 
+                 tllexer.symb("->") * 
+                 lpeg.V("NilableTuple") / tltype.Function;
   MethodType = lpeg.V("InputType") * tllexer.symb("=>") * lpeg.V("NilableTuple") *
                lpeg.Cc(true) / tltype.Function;
   InputType = tllexer.symb("(") * (lpeg.V("TupleType") + lpeg.Cc(nil)) * tllexer.symb(")") *
