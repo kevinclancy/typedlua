@@ -39,9 +39,6 @@ end
 
 -- isLiteral : (type) -> (boolean)
 function tltype.isLiteral (t)
-  if not t then 
-    assert(false)
-  end
   return t.tag == "TLiteral"
 end
 
@@ -588,12 +585,11 @@ function tltype.substitute (t,x,s)
     local tout_res = tltype.substitute(t[2],x,s)
     local tparams_res = {}
     for i,tparam in pairs(t[3]) do
-      local pos, name, variance, bound = tparam.pos, tparam[1], tparam[2], tparam[3]
-      table.insert(tparams_res, tlast.tpar(pos,name,variance,bound))
+      table.insert(tparams_res, tparam)
     end
     return tltype.Function(tparams_res, tin_res, tout_res)
   elseif t.tag == "TField" then
-    return { tag = "TField", const = t.is_const, [1] = tltype.substitute(t[1],x,s), [2] = tltype.substitute(t[2],x,s) }
+    return { tag = "TField", const = t.const, [1] = tltype.substitute(t[1],x,s), [2] = tltype.substitute(t[2],x,s) }
   elseif t.tag == "TTable" then
     local res = {}
     for i,field in ipairs(t) do
@@ -906,7 +902,7 @@ local function subtype_symbol (assume, env, t1, t2, relation)
   end
   
   if t2_symbol and ti2.tag == "TIVariable" then
-    return subtype(assume, env, t1, ti2[1], relation)  
+    return false
   end    
   
   --handle userdata

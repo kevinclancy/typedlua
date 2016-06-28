@@ -1010,7 +1010,7 @@ local function check_call (env, exp)
           local name,variance,tbound = tparam[1], tparam[2], tparam[3]
           for j, targ in ipairs(targs) do
             local jname = tparams[j][1]
-            tbound = substitute(tbound, jname, targ)
+            tbound = tltype.substitute(tbound, jname, targ)
           end
           table.insert(substituted_bounds, tbound)
         end
@@ -1699,17 +1699,24 @@ local function get_elem_types (env, elems)
     return constructors,methods,members
 end
 
--- check_constructor_supercall : (env, parlist, id, explist, type) -> ()
-local function check_constructor_supercall (env, supercons_name, superargs, tparent)
+-- check_constructor_supercall : (env, id, explist, type) -> ()
+local function check_constructor_supercall (env, supercons_name, super_targs, super_args, tparent)
   local constructor = tltype.getField(env, tltype.Literal(supercons_name[1]), tparent)
   if not constructor then
     local msg = "superclass constructor %s called, but superclass %s does not have a constructor with that name."
     msg = string.format(msg, supercons_name[1], tltype.tostring(tparent))
     typeerror(env, "call", msg, supercons_name.pos)
   else
-    check_explist(env, superargs)
+    check_explist(env, super_args)
     local t = tltype.first(constructor)
-    local inferred_type = arglist2type(superargs, env.strict)
+    
+    local tpars = constructor[3]
+    for i,tpar in ipairs(tpars) do
+      local name = tpar[1]
+      t = tltype.substitute(t, name, super_targs[i])
+    end
+    
+    local inferred_type = arglist2type(super_args, env.strict)
     check_arguments(env, supercons_name[1], t[1], inferred_type, supercons_name.pos)
   end
 end
@@ -1725,7 +1732,7 @@ local function check_constructor_self (env, tself, pos)
   end
 end
 
-local function check_constructor (env, elem, instance_members, parent_members, parent)
+local function check_constructor (env, elem, instance_members, parent_members, parent, supertargs)
   local name, idlist, supercons_name, superargs, body, pos = elem[1], elem[2], elem[3], elem[4], elem[5], elem.pos
   tlst.begin_function(env)
   tlst.set_in_constructor(env)
@@ -1735,7 +1742,7 @@ local function check_constructor (env, elem, instance_members, parent_members, p
   local t = tltype.Function({}, input_type, output_type)
   if superargs ~= "NoSuperCall" then
     if parent then 
-      check_constructor_supercall(env,supercons_name,superargs,get_type(parent))
+      check_constructor_supercall(env,supercons_name,supertargs,superargs,get_type(parent))
     else
       local msg = "called superclass constructor, but %s has no superclass"
       msg = string.format(msg, name[1])
@@ -2223,13 +2230,13 @@ local function check_inheritance_clause (env, superclass, superargs)
   return true
 end
 
-local function check_class_code(env, elems, t_instance, instance_members, superclass_members, superclass)
+local function check_class_code(env, elems, t_instance, instance_members, superclass_members, superclass, supertargs)
   for _,elem in ipairs(elems) do
     if elem.tag == "ConcreteClassMethod" then
       local name,parlist,tret,body = elem[1], elem[2], elem[3], elem[4]
       check_method(env,parlist,tret,body,t_instance,elem.pos)
     elseif elem.tag == "ClassConstructor" then
-      check_constructor(env, elem, instance_members, superclass_members, superclass)
+      check_constructor(env, elem, instance_members, superclass_members, superclass, supertargs)
     else
       assert("expected class element, but got " .. elem.tag)
     end
@@ -2305,8 +2312,10 @@ local function new_check_class (env, stm)
     else
       tlst.set_tsuper(env, "None")
     end
-    local t_instance_symbol = tltype.Symbol(name[1], t_params)
-    check_class_code(env, elems, t_instance_symbol, instance_members, superclass_members, superclass)
+    local t_param_symbols = {}
+    for i,v in ipairs(t_params) do t_param_symbols[i] = tltype.Symbol(v[1],{}) end    
+    local t_instance_symbol = tltype.Symbol(name[1], t_param_symbols)
+    check_class_code(env, elems, t_instance_symbol, instance_members, superclass_members, superclass, superargs)
     
     --pop off the portion of the environment containing type parameters
     tlst.end_scope(env)
