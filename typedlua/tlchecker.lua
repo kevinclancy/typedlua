@@ -74,19 +74,16 @@ local function kindcheck (env, t)
     tlst.begin_scope(env)
     env.variance = env.variance * -1
     --check type arguments
-    if t[3] then
-      for i,tpar in ipairs(tpars) do
-        local name, variance, tbound = tpar[1], tpar[2], tpar[3]
-        assert(variance == "Invariant")
-        local ti = tlst.typeinfo_Variable(tbound, variance)
-        env.set_typeinfo(env, name, ti, true)
-      end
-      
-      for i,tpar in ipairs(tpars) do
-        local name, variance, tbound = tpar[1], tpar[2], tpar[3]
-        kindcheck(env, tbound)
-      end  
+    for i,tpar in ipairs(t[3]) do
+      local name, variance, tbound = tpar[1], tpar[2], tpar[3]
+      assert(variance == "Invariant")
+      local ti = tlst.typeinfo_Variable(tbound, variance)
+      env.set_typeinfo(env, name, ti, true)
     end
+    for i,tpar in ipairs(t[3]) do
+      local tbound = tpar[3]
+      kindcheck(env, tbound)
+    end  
     kindcheck(env,t[1])
     env.variance = env.variance * -1
     kindcheck(env,t[2])
@@ -143,11 +140,11 @@ local function kindcheck (env, t)
           local msg = string.format("Only class/interface types should be supplied type arguments")
           typeerror(env, "kind", msg, t.pos)
         end
-        if ti.variance == "Covariant" and env.variance <= 0 then
+        if ti[2] == "Covariant" and env.variance <= 0 then
           local msg = "Contravariant usage of covariant type variable %s"
           msg = string.format(msg, name)
           typeerror(env, "kind", msg, t.pos)
-        elseif ti.variance == "Contravariant" and env.variance >= 0 then
+        elseif ti[2] == "Contravariant" and env.variance >= 0 then
           local msg = "Covariant usage of contravariant type variable %s"
           msg = string.format(msg, name)
           typeerror(env, "kind", msg, t.pos)
@@ -2125,6 +2122,7 @@ local function get_class_types(env, stm)
       typeerror(env, "inheritance", msg, member.id.pos)
       return false
     end     
+    kindcheck(env, member.ty)
     local newelem = tltype.Field(true, tltype.Literal(k), member.ty) 
     instance_members[k] = newelem
     instance_fields[#instance_fields + 1] = newelem
@@ -2144,7 +2142,7 @@ local function get_class_types(env, stm)
       typeerror(env, "inheritance", msg, method.id.pos)
       return false     
     end
-    
+    kindcheck(env, method.ty)
     local newelem = tltype.Field(true, tltype.Literal(k), method.ty) 
     instance_methods[k] = newelem
     instance_fields[#instance_fields + 1] = newelem
@@ -2295,6 +2293,7 @@ local function new_check_class (env, stm)
   end
   
   -- checks subtyping between parent instantiation and child class
+  -- kindchecks the types included in declarations
   local success, t_instance, t_class, instance_members, superclass_members = get_class_types(env, stm)
   
   if success then

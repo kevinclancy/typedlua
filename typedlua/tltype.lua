@@ -562,10 +562,10 @@ function tltype.substitute (t,x,s)
     return t
   elseif t.tag == "TUnion" then
     local res = {}
-    for i,union_element in ipairs(t) do
+    for i,_ in ipairs(t) do
       res[i] = tltype.substitute(t[i],x,s)
     end
-    return tltype.Union(res)
+    return tltype.Union( table.unpack(res) )
   elseif t.tag == "TVararg" then
     return tltype.Vararg(tltype.substitute(t[1],x,s))
   elseif t.tag == "TTuple" then
