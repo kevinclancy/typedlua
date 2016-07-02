@@ -65,10 +65,10 @@ local G = lpeg.P { "TypedLua";
              tllexer.report_error();
   -- type language
   Type = lpeg.V("NilableType");
-  NilableType = lpeg.V("UnionType") * (tllexer.symb("?") * lpeg.Cc(true))^-1 /
-                tltype.UnionNil;
-  UnionType = lpeg.V("PrimaryType") * (lpeg.Cg(tllexer.symb("|") * lpeg.V("PrimaryType"))^0) /
-              tltype.Union;
+  NilableType = lpeg.Cp() * lpeg.V("UnionType") * (tllexer.symb("?") * lpeg.Cc(true))^-1 /
+                tltype.PUnionNil;
+  UnionType = lpeg.Cp() * lpeg.V("PrimaryType") * (lpeg.Cg(tllexer.symb("|") * lpeg.V("PrimaryType"))^0) /
+              tltype.PUnion;
   PrimaryType = lpeg.V("LiteralType") +
                 lpeg.V("BaseType") +
                 lpeg.V("NilType") +
@@ -79,38 +79,39 @@ local G = lpeg.P { "TypedLua";
                 lpeg.V("TableType") +
                 lpeg.V("VariableType");
                
-  LiteralType = ((tllexer.token("false", "Type") * lpeg.Cc(false)) +
+  LiteralType = lpeg.Cp() * 
+                ((tllexer.token("false", "Type") * lpeg.Cc(false)) +
                 (tllexer.token("true", "Type") * lpeg.Cc(true)) +
                 tllexer.token(tllexer.Number, "Type") +
                 tllexer.token(tllexer.String, "Type")) /
-                tltype.Literal;
-  BaseType = tllexer.token("boolean", "Type") / tltype.Boolean +
-             tllexer.token("number", "Type") / tltype.Number +
-             tllexer.token("string", "Type") / tltype.String +
-             tllexer.token("integer", "Type") * lpeg.Carg(3) / tltype.Integer;
-  NilType = tllexer.token("nil", "Type") / tltype.Nil;
-  ValueType = tllexer.token("value", "Type") / tltype.Value;
-  AnyType = tllexer.token("any", "Type") / tltype.Any;
-  SelfType = tllexer.token("self", "Type") / tltype.Self;
-  FunctionType = (lpeg.V("InvTypeParams"))^0 * lpeg.V("InputType") * tllexer.symb("->") * lpeg.V("NilableTuple") /
-                 tltype.Function;
-  MethodType = lpeg.V("InputType") * tllexer.symb("=>") * lpeg.V("NilableTuple") *
-               lpeg.Cc(true) / tltype.Function;
-  InputType = tllexer.symb("(") * (lpeg.V("TupleType") + lpeg.Cc(nil)) * tllexer.symb(")") *
+                tltype.PLiteral;
+  BaseType = lpeg.Cp() * tllexer.token("boolean", "Type") / tltype.PBoolean +
+             lpeg.Cp() * tllexer.token("number", "Type") / tltype.PNumber +
+             lpeg.Cp() * tllexer.token("string", "Type") / tltype.PString +
+             lpeg.Cp() * tllexer.token("integer", "Type") * lpeg.Carg(3) / tltype.PInteger;
+  NilType = lpeg.Cp() * tllexer.token("nil", "Type") / tltype.PNil;
+  ValueType = lpeg.Cp() * tllexer.token("value", "Type") / tltype.PValue;
+  AnyType = lpeg.Cp() * tllexer.token("any", "Type") / tltype.PAny;
+  SelfType = lpeg.Cp() * tllexer.token("self", "Type") / tltype.PSelf;
+  FunctionType = lpeg.Cp() * (lpeg.V("InvTypeParams"))^0 * lpeg.V("InputType") * tllexer.symb("->") * lpeg.V("NilableTuple") /
+                 tltype.PFunction;
+  MethodType = lpeg.Cp() * lpeg.V("InputType") * tllexer.symb("=>") * lpeg.V("NilableTuple") *
+               lpeg.Cc(true) / tltype.PFunction;
+  InputType = lpeg.Cp() * tllexer.symb("(") * (lpeg.V("TupleType") + lpeg.Cc(nil)) * tllexer.symb(")") *
               lpeg.Carg(2) /
-              tltype.inputTuple;
-  NilableTuple = lpeg.V("UnionlistType") * (tllexer.symb("?") * lpeg.Carg(2))^-1 /
-                 tltype.UnionlistNil;
-  UnionlistType = lpeg.V("OutputType") * (lpeg.Cg(tllexer.symb("|") * lpeg.V("OutputType"))^0) /
-                  tltype.Unionlist;
-  OutputType = tllexer.symb("(") * (lpeg.V("TupleType") + lpeg.Cc(nil)) * tllexer.symb(")") *
+              tltype.PinputTuple;
+  NilableTuple = lpeg.Cp() * lpeg.V("UnionlistType") * (tllexer.symb("?") * lpeg.Carg(2))^-1 /
+                 tltype.PUnionlistNil;
+  UnionlistType = lpeg.Cp() * lpeg.V("OutputType") * (lpeg.Cg(tllexer.symb("|") * lpeg.V("OutputType"))^0) /
+                  tltype.PUnionlist;
+  OutputType = lpeg.Cp() * tllexer.symb("(") * (lpeg.V("TupleType") + lpeg.Cc(nil)) * tllexer.symb(")") *
                lpeg.Carg(2) /
-               tltype.outputTuple;
-  TupleType = lpeg.Ct(lpeg.V("Type") * (tllexer.symb(",") * lpeg.V("Type"))^0) *
+               tltype.PoutputTuple;
+  TupleType = lpeg.Cp() * lpeg.Ct(lpeg.V("Type") * (tllexer.symb(",") * lpeg.V("Type"))^0) *
               (tllexer.symb("*") * lpeg.Cc(true))^-1 /
-              tltype.Tuple;
-  TableType = tllexer.symb("{") * lpeg.V("TableTypeBody") * tllexer.symb("}") /
-              tltype.Table;
+              tltype.PTuple;
+  TableType = lpeg.Cp() * tllexer.symb("{") * lpeg.V("TableTypeBody") * tllexer.symb("}") /
+              tltype.PTable;
   TableTypeBody = lpeg.V("RecordType") +
                   lpeg.V("HashType") +
                   lpeg.V("ArrayType") +
@@ -124,12 +125,12 @@ local G = lpeg.P { "TypedLua";
              tltype.Field;
   ArrayType = lpeg.Carg(3) * lpeg.V("FieldType") / tltype.ArrayField;
   KeyType = lpeg.V("BaseType") + lpeg.V("ValueType") + lpeg.V("AnyType");
-  FieldType = lpeg.V("Type") * lpeg.Cc(tltype.Nil()) / tltype.Union;
+  FieldType = lpeg.Cp() * lpeg.V("Type") * lpeg.Cc(tltype.Nil()) / tltype.PUnion;
   TypeArgs = lpeg.Ct(tllexer.symb('<') * lpeg.V("Type") * (tllexer.symb(",") * lpeg.V("Type"))^0 * 
                      tllexer.symb('>'));
-  VariableType = tllexer.token(tllexer.Name, "Type") * 
-                 (lpeg.V("TypeArgs") + lpeg.Cc({})) / tltype.Symbol;
-  RetType = lpeg.V("NilableTuple") +
+  VariableType = lpeg.Cp() * tllexer.token(tllexer.Name, "Type") * 
+                 (lpeg.V("TypeArgs") + lpeg.Cc({})) / tltype.PSymbol;
+  RetType = lpeg.Cp() * lpeg.V("NilableTuple") +
             lpeg.V("Type") * lpeg.Carg(2) / tltype.retType;
   Id = lpeg.Cp() * tllexer.token(tllexer.Name, "Name") / tlast.ident;
   TypeDecId = (tllexer.kw("const") * lpeg.V("Id") / tlast.setConst) +
@@ -372,7 +373,7 @@ local traverse_block, traverse_explist, traverse_varlist, traverse_parlist
 function traverse_parlist (env, parlist)
   local len = #parlist
   if len > 0 and parlist[len].tag == "Dots" then
-    local t = parlist[len][1] or tltype.Any()
+    local t = parlist[len][1] or tltype.Any(parlist.pos)
     tlst.set_vararg(env, t)
     len = len - 1
   end
@@ -616,9 +617,6 @@ local function traverse_interface (env, stm)
   if not status then
     return nil, tllexer.syntaxerror(env.subject, stm.pos, env.filename, msg)
   end
-  if tltype.checkRecursive(t, name) then
-    stm[2] = tltype.Recursive(name, t)
-  end
   return true
 end
 
@@ -835,7 +833,7 @@ local function traverse (ast, errorinfo, strict)
   local env = tlst.new_env(errorinfo.subject, errorinfo.filename, strict)
   local _env = tlast.ident(0, "_ENV")
   tlst.begin_function(env)
-  tlst.set_vararg(env, tltype.String())
+  tlst.set_vararg(env, tltype.String(nil))
   tlst.begin_scope(env)
   tlst.set_local(env, _env)
   for k, v in ipairs(ast) do

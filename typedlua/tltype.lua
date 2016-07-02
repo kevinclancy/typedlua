@@ -17,9 +17,19 @@ function tltype.Literal (l)
   return { tag = "TLiteral", [1] = l, name = tostring(l) }
 end
 
+function tltype.PLiteral (pos, l)
+  local ret = tltype.Literal(l)
+  ret.pos = pos
+  return ret
+end
+
 -- False : () -> (type)
 function tltype.False ()
   return tltype.Literal(false)
+end
+
+function tltype.PFalse (pos)
+  return tltype.PLiteral(pos, false)
 end
 
 -- True : () -> (type)
@@ -27,14 +37,28 @@ function tltype.True ()
   return tltype.Literal(true)
 end
 
+function tltype.PTrue (pos)
+  return tltype.PLiteral(pos, true)
+end
+
 -- Num : (number) -> (type)
 function tltype.Num (n)
   return tltype.Literal(n)
 end
 
+function tltype.PNum (pos,n)
+  return tltype.PLiteral(pos,n)
+end
+
+
 -- Str : (string) -> (type)
 function tltype.Str (s)
   return tltype.Literal(s)
+end
+
+-- PStr : (number, string) -> (type)
+function tltype.PStr (pos, s)
+  return tltype.PLiteral(pos, s)
 end
 
 -- isLiteral : (type) -> (boolean)
@@ -87,9 +111,21 @@ function tltype.Base (s)
   return { tag = "TBase", [1] = s, name = s }
 end
 
+-- Base : (number, "boolean"|"number"|"string") -> (type)
+function tltype.PBase (pos, s)
+  local ret = tltype.Base(s)
+  ret.pos = pos
+  return ret
+end
+
 -- Boolean : () -> (type)
 function tltype.Boolean ()
   return tltype.Base("boolean")
+end
+
+-- Boolean : (number) -> (type)
+function tltype.PBoolean (pos)
+  return tltype.PBase(pos,"boolean")
 end
 
 -- Number : () -> (type)
@@ -97,14 +133,29 @@ function tltype.Number ()
   return tltype.Base("number")
 end
 
+-- PNumber : (number) -> (type)
+function tltype.PNumber (pos)
+  return tltype.PBase(pos, "number")
+end
+
 -- String : () -> (type)
 function tltype.String ()
   return tltype.Base("string")
 end
 
+-- PString : (number) -> (type)
+function tltype.PString (pos)
+  return tltype.PBase(pos, "string")
+end
+
 -- Integer : (boolean?) -> (type)
 function tltype.Integer (i)
   if i then return tltype.Base("integer") else return tltype.Base("number") end
+end
+
+-- PInteger : (number, boolean?) -> (type)
+function tltype.PInteger (pos, i)
+  if i then return tltype.PBase(pos, "integer") else return tltype.PBase(pos, "number") end
 end
 
 -- isBase : (type) -> (boolean)
@@ -139,6 +190,14 @@ function tltype.Nil ()
   return { tag = "TNil", name = "nil" }
 end
 
+-- PNil : () -> (type)
+function tltype.PNil (pos)
+  local ret = tltype.Nil()
+  ret.pos = pos
+  return ret
+end
+
+
 -- isNil : (type) -> (boolean)
 function tltype.isNil (t)
   return t.tag == "TNil"
@@ -149,6 +208,13 @@ end
 -- Value : () -> (type)
 function tltype.Value ()
   return { tag = "TValue", name = "value" }
+end
+
+-- PValue : (number) -> (type)
+function tltype.PValue (pos)
+  local ret = tltype.Value()
+  ret.pos = pos
+  return ret
 end
 
 -- isValue : (type) -> (boolean)
@@ -163,6 +229,13 @@ function tltype.Any ()
   return { tag = "TAny", name = "any" }
 end
 
+-- PAny : (number) -> (type)
+function tltype.PAny (pos)
+  local ret = tltype.Any()
+  ret.pos = pos
+  return ret
+end
+
 -- isAny : (type) -> (boolean)
 function tltype.isAny (t)
   return t.tag == "TAny"
@@ -175,6 +248,13 @@ function tltype.Self ()
   return { tag = "TSelf", name = "self" }
 end
 
+-- PSelf : (number) -> (type)
+function tltype.PSelf (pos)
+  local ret = tltype.Self()
+  ret.pos = pos
+  return ret
+end
+
 -- isSelf : (type) -> (boolean)
 function tltype.isSelf (t)
   return t.tag == "TSelf"
@@ -185,6 +265,13 @@ end
 -- Void : () -> (type)
 function tltype.Void ()
   return { tag = "TVoid", name = "void" }
+end
+
+-- PVoid : (number) -> (type)
+function tltype.PVoid (pos)
+  local ret = tltype.Void()
+  ret.pos = pos
+  return ret
 end
 
 -- isVoid : (type) -> (boolean)
@@ -202,6 +289,13 @@ function tltype.Union (...)
   else
     return { tag = "TUnion", ... }
   end
+end
+
+-- PUnion : (number, type*) -> (type)
+function tltype.PUnion (pos, ...)
+  local ret = tltype.Union(...)
+  ret.pos = pos
+  return ret
 end
 
 function tltype.simplifyUnion (env, t)
@@ -231,7 +325,7 @@ function tltype.simplifyUnion (env, t)
       if enter then table.insert(l3, l2[i]) end
     end
     -- simplify union, TODO: this seems broken, as (Any -> Any | Any -> Any) would incorrectly simplify to Any
-    local ret = { tag = "TUnion" }
+    local ret = { tag = "TUnion", pos = t.pos }
     for i = 1, #l3 do
       local enter = true
       for j = 1, #l3 do
@@ -243,7 +337,7 @@ function tltype.simplifyUnion (env, t)
       if enter then table.insert(ret, l3[i]) end
     end
     if #ret == 0 then
-      return tltype.Any()
+      return tltype.PAny(t.pos)
     elseif #ret == 1 then
       return ret[1]
     else
@@ -282,7 +376,8 @@ function tltype.filterUnion (env, u, t)
         table.insert(l, v)
       end
     end
-    return tltype.Union(env, table.unpack(l))
+    local ret = tltype.PUnion(u.pos, table.unpack(l))
+    return tltype.simplifyUnion(env, ret)
   else
     return u
   end
@@ -291,10 +386,17 @@ end
 -- UnionNil : (type, true?) -> (type)
 function tltype.UnionNil (t, is_union_nil)
   if is_union_nil then
-    return tltype.Union(t, tltype.Nil())
+    return tltype.PUnion(t.pos, t, tltype.Nil())
   else
     return t
   end
+end
+
+-- PUnionNil : (number, type, true?) -> (type)
+function tltype.PUnionNil (pos, t, is_union_nil)
+  local ret = tltype.UnionNil (t, is_union_nil)
+  ret.pos = pos
+  return ret
 end
 
 -- vararg types
@@ -302,6 +404,13 @@ end
 -- Vararg : (type) -> (type)
 function tltype.Vararg (t)
   return { tag = "TVararg", [1] = t, name = t.name and t.name .. "*" }
+end
+
+-- PVararg : (number, type) -> (type)
+function tltype.PVararg (pos, t)
+  local ret = tltype.Vararg(t)
+  ret.pos = pos
+  return ret
 end
 
 -- isVararg : (type) -> (boolean)
@@ -319,11 +428,18 @@ function tltype.Tuple (l, is_vararg)
   return { tag = "TTuple", table.unpack(l) }
 end
 
--- inputTuple : (type?, boolean) -> (type)
-function tltype.inputTuple (t, strict)
+-- PTuple : (pos, {number:type}, true?) -> (type)
+function tltype.PTuple (pos, l, is_vararg)
+  local ret = tltype.Tuple(l, is_vararg)
+  ret.pos = pos
+  return ret
+end
+
+-- inputTuple : (number, type?, boolean) -> (type)
+function tltype.inputTuple (pos, t, strict)
   if not strict then
     if not t then
-      return tltype.Tuple({ tltype.Value() }, true)
+      return tltype.PTuple(pos, { tltype.Value() }, true)
     else
       if not tltype.isVararg(t[#t]) then
         table.insert(t, tltype.Vararg(tltype.Value()))
@@ -339,7 +455,15 @@ function tltype.inputTuple (t, strict)
   end
 end
 
--- outputTuple : (type?, boolean) -> (type)
+-- PinputTuple : (number, type?, boolean) -> (type)
+function tltype.PinputTuple (pos, t, strict)
+  local ret = tltype.inputTuple(t, strict)
+  ret.pos = pos
+  return ret
+end
+
+
+-- outputTuple : (number, type?, boolean) -> (type)
 function tltype.outputTuple (t, strict)
   if not strict then
     if not t then
@@ -359,9 +483,25 @@ function tltype.outputTuple (t, strict)
   end
 end
 
+-- PoutputTuple : (number, type?, boolean) -> (type)
+function tltype.PoutputTuple (pos, t, strict)
+  local ret = tltype.outputTuple(pos, t, strict)
+  ret.pos = pos
+  return ret
+end
+
+
+
 -- retType : (type, boolean) -> (type)
 function tltype.retType (t, strict)
   return tltype.outputTuple(tltype.Tuple({ t }), strict)
+end
+
+-- PretType: (number, type, boolean) -> (type)
+function tltype.PretType (pos, t, strict)
+  local ret = tltype.retType(tltype.Tuple({ t }), strict)
+  ret.pos = pos
+  return ret
 end
 
 -- isTuple : (type) -> (boolean)
@@ -376,6 +516,13 @@ function tltype.Unionlist (...)
   local t = tltype.Union(...)
   if tltype.isUnion(t) then t.tag = "TUnionlist" end
   return t
+end
+
+-- PUnionlist : (number, type*) -> (type)
+function tltype.PUnionlist (pos, ...)
+  local ret = tltype.Unionlist(...)
+  ret.pos = pos
+  return ret
 end
 
 -- isUnionlist : (type) -> (boolean)
@@ -393,6 +540,13 @@ function tltype.UnionlistNil (t, is_union_nil)
   end
 end
 
+-- PUnionlistNil : (number, type, boolean?) -> (type)
+function tltype.PUnionlistNil (pos, t, is_union_nil)
+  local ret = tltype.UnionlistNil(t, is_union_nil)
+  ret.pos = pos
+  return ret
+end
+
 -- function types
 
 -- Function : ({tpars}, type, type, true?) -> (type)
@@ -405,6 +559,13 @@ function tltype.Function (tparams, t1, t2, is_method)
     end
   end
   return { tag = "TFunction", [1] = t1, [2] = t2, [3] = tparams }
+end
+
+-- PFunction : (number, {tpars}, type, type, true?) -> (type)
+function tltype.PFunction (pos, tparams, t1, t2, is_method)
+  local ret = tltype.Function(tparams, t1, t2, is_method)
+  ret.pos = pos
+  return ret
 end
 
 function tltype.isFunction (t)
@@ -450,6 +611,13 @@ function tltype.Table (...)
   return { tag = "TTable", ... }
 end
 
+-- PTable : (number, field*) -> (type)
+function tltype.PTable (pos, ...)
+  local ret = tltype.Table(...)
+  ret.pos = pos
+  return ret
+end
+
 -- isTable : (type) -> (boolean)
 function tltype.isTable (t)
   return t.tag == "TTable"
@@ -490,6 +658,26 @@ function tltype.fieldlist (idlist, t)
   return table.unpack(l)
 end
 
+
+-- type variables
+
+-- Symbol: (string,{type}?) -> (type)
+function tltype.Symbol (name,args)
+  return { tag = "TSymbol", [1] = name, [2] = args or {} }
+end
+
+-- PSymbol: (number, string,{type}?) -> (type)
+function tltype.PSymbol (pos, name, args)
+  local ret = tltype.Symbol(name, args)
+  ret.pos = pos
+  return ret
+end
+
+-- isSymbol : (type) -> (boolean)
+function tltype.isSymbol (t)
+  return t.tag == "TSymbol"
+end
+
 -- checkTypeDec : (string, type) -> (true)?
 function tltype.checkTypeDec (n, t)
   local predef_type = {
@@ -528,18 +716,6 @@ function tltype.checkTypeDec (n, t)
   end
 end
 
--- type variables
-
--- Variable : (string,{type}?) -> (type)
-function tltype.Symbol (name,args)
-  return { tag = "TSymbol", [1] = name, [2] = args or {} }
-end
-
--- isVariable : (type) -> (boolean)
-function tltype.isSymbol (t)
-  return t.tag == "TSymbol"
-end
-
 
 --type substitution
 
@@ -565,11 +741,11 @@ function tltype.substitute (t,x,s)
     for i,_ in ipairs(t) do
       res[i] = tltype.substitute(t[i],x,s)
     end
-    return tltype.Union( table.unpack(res) )
+    return tltype.PUnion(t.pos, table.unpack(res))
   elseif t.tag == "TVararg" then
-    return tltype.Vararg(tltype.substitute(t[1],x,s))
+    return tltype.PVararg(t.pos, tltype.substitute(t[1],x,s))
   elseif t.tag == "TTuple" then
-    local res = { tag = "TTuple" }
+    local res = { tag = "TTuple", pos = t.pos }
     for i, tuple_element in ipairs(t) do
       res[i] = tltype.substitute(t[i],x,s)
     end
@@ -579,7 +755,7 @@ function tltype.substitute (t,x,s)
     for i,union_element in ipairs(t) do
       res[i] = tltype.substitute(t[i],x,s)
     end
-    return tltype.UnionList(res)  
+    return tltype.PUnionList(t.pos, res)  
   elseif t.tag == "TFunction" then
     local tin_res = tltype.substitute(t[1],x,s)
     local tout_res = tltype.substitute(t[2],x,s)
@@ -587,7 +763,7 @@ function tltype.substitute (t,x,s)
     for i,tparam in pairs(t[3]) do
       table.insert(tparams_res, tparam)
     end
-    return tltype.Function(tparams_res, tin_res, tout_res)
+    return tltype.PFunction(t.pos, tparams_res, tin_res, tout_res)
   elseif t.tag == "TField" then
     return { tag = "TField", const = t.const, [1] = tltype.substitute(t[1],x,s), [2] = tltype.substitute(t[2],x,s) }
   elseif t.tag == "TTable" then
@@ -595,7 +771,7 @@ function tltype.substitute (t,x,s)
     for i,field in ipairs(t) do
       res[i] = tltype.substitute(t[i],x,s)
     end
-    return tltype.Table(table.unpack(res))      
+    return tltype.PTable(t.pos, table.unpack(res))      
   elseif t.tag == "TSymbol" then
     local name,args = t[1],t[2]
     
@@ -607,7 +783,7 @@ function tltype.substitute (t,x,s)
       for i,arg in ipairs(args) do
         new_args[i] = tltype.substitute(arg,x,s)
       end
-      return tltype.Symbol(name,new_args)
+      return tltype.PSymbol(t.pos, name, new_args)
     else
       return t
     end
@@ -686,30 +862,6 @@ end
 function tltype.checkRecursive (t, name)
   return check_recursive(t, name)
 end
-
-
---kinds
-
--- ProperKind : () -> (kind)
-function tltype.ProperKind ()
-  return { tag = "KProper" }
-end
-
--- isProperKind (kind) -> (boolean)
-function tltype.isProperKind (k)
-  return k.tag == "KProper"
-end
-
--- OperatorKind : ({string},{type},{"Covariant"|"Contravariant"|"Invariant"}) -> (kind)
-function tltype.OperatorKind (tpars)
-  return { tag = "KOperator", [1] = tpars}
-end
-
--- isOperatorKind : (kind) -> (boolean)
-function tltype.isOperatorKind (k)
-  return k.tag == "KOperator"
-end
-
 
 -- subtyping and consistent-subtyping
 local subtype
@@ -1148,7 +1300,7 @@ end
 -- first level type
 
 local function resize_tuple (t, n)
-  local tuple = { tag = "TTuple" }
+  local tuple = { tag = "TTuple", pos = t.pos }
   local vararg = t[#t][1]
   for i = 1, #t - 1 do
     tuple[i] = t[i]
@@ -1184,7 +1336,7 @@ function tltype.unionlist2tuple (t)
       table.insert(l[j], u[i][j])
     end
   end
-  local n = { tag = "TTuple" }
+  local n = { tag = "TTuple", pos = t.pos }
   for i = 1, #l do
     n[i] = tltype.Union(table.unpack(l[i]))
   end
@@ -1199,7 +1351,7 @@ function tltype.unionlist2union (t, i)
   for k, v in ipairs(t) do
     l[#l + 1] = v[i]
   end
-  return tltype.Union(table.unpack(l))
+  return tltype.PUnion(t.pos, table.unpack(l))
 end
 
 function tltype.first (t)
