@@ -92,7 +92,14 @@ local function kindcheck (env, t)
     env.variance = env.variance * -1
     kindcheck(env,t[1])
     env.variance = env.variance * -1
-    kindcheck(env,t[2])
+    if tltype.isConstField(t) then
+      kindcheck(env,t[2])
+    else
+      local orig_variance = env.variance
+      env.variance = 0
+      kindcheck(env,t[2])
+      env.variance = orig_variance      
+    end
   elseif t.tag == "TTable" then
     for _,field in ipairs(t) do
       kindcheck(env,field)
@@ -1666,12 +1673,12 @@ local function get_elem_types (env, elems)
       if elem.tag == "ConcreteClassField" then
         local name = elem[1][1]
         check_redecl(name,elem.pos)
-        members[name] = { id = elem[1], ty = elem[2] }
+        members[name] = { id = elem[1], ty = elem[2], const = elem.const }
       elseif elem.tag == "AbstractClassField" then
         local name,t = elem[1][1], elem[2]
         check_redecl(name,elem.pos)  
         --TODO: handle abstract vs. concrete fields
-        members[name] = { id = elem[1], ty = t }
+        members[name] = { id = elem[1], ty = t, const = elem.const }
       elseif elem.tag == "ConcreteClassMethod" then
         local name,parlist,tret = elem[1][1],elem[2],elem[3]
         check_redecl(name,elem.pos)         
@@ -2081,6 +2088,7 @@ local function get_superclass_fields(env, superclass, superargs)
   return members, methods, fields
 end
 
+--kindchecks all of the class's elements
 --returns instance_type, class_type for the given class value
 --(env,stm) -> (type,type)
 local function get_class_types(env, stm)
@@ -2122,8 +2130,8 @@ local function get_class_types(env, stm)
       typeerror(env, "inheritance", msg, member.id.pos)
       return false
     end     
-    kindcheck(env, member.ty)
-    local newelem = tltype.Field(true, tltype.Literal(k), member.ty) 
+    local newelem = tltype.Field(member.const, tltype.Literal(k), member.ty) 
+    kindcheck(env, newelem)
     instance_members[k] = newelem
     instance_fields[#instance_fields + 1] = newelem
   end

@@ -240,9 +240,9 @@ function tlast.statLocalClassDec (stat)
   return stat
 end
 
---classElementConcreteField : (pos,name,ty) -> (classElement)
-function tlast.classElementConcreteField(pos,name,ty)
-  return { tag = "ConcreteClassField", pos = pos, [1] = name, [2] = ty }
+--classElementConcreteField : (pos,boolean,name,ty) -> (classElement)
+function tlast.classElementConcreteField(pos,is_const,name,ty)
+  return { tag = "ConcreteClassField", pos = pos, const = is_const, [1] = name, [2] = ty }
 end
 
 --classElementAbstractField : (pos,name,ty) -> (classElement)

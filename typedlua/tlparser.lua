@@ -148,6 +148,7 @@ local G = lpeg.P { "TypedLua";
               tlast.statInterface;
   
   ClassConcreteFieldDef = lpeg.Cp() *
+                          (tllexer.kw("const") * lpeg.Cc(true) + lpeg.Cc(false)) * 
                           lpeg.V("Id") * tllexer.symb(":") * 
                           lpeg.V("Type") / tlast.classElementConcreteField;
   
