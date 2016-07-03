@@ -1413,7 +1413,17 @@ local function type2str (t, n)
     end
     return "{" .. table.concat(l, ", ") .. "}"
   elseif tltype.isSymbol(t) then
-    return t[1]
+    local ret = t[1]
+    local targs = t[2]
+    if #targs > 0 then
+      ret = ret .. '<'
+      ret = ret .. tltype.tostring(targs[1])
+      for i=2,#targs do
+        ret = ret .. ", " .. tltype.tostring(targ[i])
+      end
+      ret = ret .. '>'
+    end
+    return ret
   elseif tltype.isVoid(t) then
     return "(void)"
   elseif tltype.isTuple(t) then
