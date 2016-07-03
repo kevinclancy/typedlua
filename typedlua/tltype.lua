@@ -1046,10 +1046,12 @@ local function subtype_symbol (assume, env, t1, t2, relation)
   
   -- handle bounded variables
   if t1_symbol and ti1.tag == "TIVariable" then
-    if ti1[1] == "NoBound" then
-      return ti1 == ti2
-    else
+    if ti1 == ti2 then
+      return true
+    elseif ti1[1] ~= "NoBound" then
       return subtype(assume, env, ti1[1], t2, relation)  
+    else
+      return false
     end
   end
   
@@ -1125,7 +1127,7 @@ local function subtype_symbol (assume, env, t1, t2, relation)
     return false
   end
 
-  if t1_symbol and ti1.tag == "TINominal" and ti1[2].tag == "KProper" then
+  if t1_symbol and ti1.tag == "TINominal" and #ti1[2] == 0 then
     --there is no type polymorphism, so we can allow equirecursive structural subtyping
     return subtype(assume, env, ti1[1], t2)
   end

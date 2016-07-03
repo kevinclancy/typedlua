@@ -125,7 +125,7 @@ local function kindcheck (env, t)
               kindcheck(env,args[i])
             elseif variance == "Contravariant" then
               env.variance = env.variance * -1
-              kindcheck(env,args[i])
+              kindcheck(env, args[i])
               env.variance = env.variance * -1
             elseif variance == "Invariant" then
               local orig_variance = env.variance
@@ -366,7 +366,6 @@ end
 
 local function check_parameters (env, parlist, selfimplicit, pos)
   local len = #parlist
-  env.variance = env.variance * -1
   if len == 0 then
     if env.strict then
       return tltype.Void()
@@ -381,7 +380,9 @@ local function check_parameters (env, parlist, selfimplicit, pos)
     for i = 1, len do
       if not parlist[i][2] then parlist[i][2] = Any end
       l[i] = parlist[i][2]
+      env.variance = env.variance * -1
       kindcheck(env,l[i])
+      env.variance = env.variance * -1
     end
     if parlist[len].tag == "Dots" then
       local t = parlist[len][1] or Any
@@ -397,7 +398,6 @@ local function check_parameters (env, parlist, selfimplicit, pos)
       end
     end
   end
-  env.variance = env.variance * -1
 end
 
 local function check_userdata (env, stm)
