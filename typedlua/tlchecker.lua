@@ -2007,7 +2007,7 @@ local function get_class_types(env, stm)
     table.insert(param_symbols, tltype.Symbol(v[1]))
   end
   local class_constructors = {}
-  local t_class_symbol = tltype.Symbol(name[1],param_symbols)
+  local t_class_symbol = tltype.Symbol(current_modname(env)..name[1], param_symbols)
   for k,v in pairs(constructors) do
     local t_constructor = v.ty
     --overwrite constructor return value with instance type
