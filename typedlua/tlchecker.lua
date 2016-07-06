@@ -411,7 +411,7 @@ local function check_parameters (env, parlist, selfimplicit, pos)
       if not parlist[i][2] then parlist[i][2] = Any end
       l[i] = parlist[i][2]
       env.variance = env.variance * -1
-      if not kindcheck_success(env,l[i]) then
+      if not kindcheck_success(env, l[i]) then
         parlist[i][2] = Any
         l[i] = Any
       end
@@ -1776,6 +1776,16 @@ local function check_constructor (env, elem, instance_members, parent_members, t
   local input_type = check_parameters(env, idlist, true, idlist.pos)
   local output_type = tltype.Tuple({ Nil }, true)
   local t = tltype.Function({}, input_type, output_type)
+  
+  local len = #idlist
+  if len > 0 and idlist[len].tag == "Dots" then len = len - 1 end
+  for k = 1,len do
+    local v = idlist[k]
+    set_type(env, v, v[2])
+    check_masking(env, v[1], v.pos)
+    tlst.set_local(env,v)
+  end
+  
   if superargs ~= "NoSuperCall" then
     if tsuper_inst then
       local tsuper_class = tlst.get_classtype(env, tsuper_inst[1])
@@ -1802,15 +1812,7 @@ local function check_constructor (env, elem, instance_members, parent_members, t
     end
   end
   tself.closed = true    
-        
-  local len = #idlist
-  if len > 0 and idlist[len].tag == "Dots" then len = len - 1 end
-  for k = 1,len do
-    local v = idlist[k]
-    set_type(env, v, v[2])
-    check_masking(env, v[1], v.pos)
-    tlst.set_local(env,v)
-  end
+  
   check_masking(env,"self",pos)
   tlst.set_local(env, { tag = "Id", pos = pos, [1] = "self", ["type"] = tself})
   local r = check_block(env,body)
