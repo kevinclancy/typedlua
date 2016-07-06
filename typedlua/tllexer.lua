@@ -78,6 +78,7 @@ tllexer.Skip = (Space + Comment)^0
 local idStart = lpeg.alpha + lpeg.P("_")
 --characters which may appear after the first character of an identifier
 local idRest = lpeg.alnum + lpeg.P("_")
+local typeIdRest = lpeg.alnum + lpeg.P(".") + lpeg.P("_")
 
 local Keywords = lpeg.P("and") + "break" + "do" + "elseif" + "else" + "end" +
                  "false" + "for" + "function" + "goto" + "if" + "in" +
@@ -86,11 +87,14 @@ local Keywords = lpeg.P("and") + "break" + "do" + "elseif" + "else" + "end" +
                  "class" + "abstract" + "method" + "constructor" + "finalizer" +
                  "super"
 
-tllexer.Reserved = Keywords * -idRest
+tllexer.Reserved = Keywords * -typeIdRest
 
 local Identifier = idStart * idRest^0
+local TypeIdentifier = idStart * typeIdRest^0
 
 tllexer.Name = -tllexer.Reserved * lpeg.C(Identifier) * -idRest
+
+tllexer.TypeName = -tllexer.Reserved * lpeg.C(TypeIdentifier) * -typeIdRest
 
 function tllexer.token (pat, name)
   return pat * tllexer.Skip + updateffp(name) * lpeg.P(false)

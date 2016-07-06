@@ -48,6 +48,28 @@ end
 
 local check_self_field
 
+local directory_separator = string.sub(package.config,1,1)
+
+-- filename_to_modulename : (string) -> (string)
+local function filename_to_modulename (name)
+  local s = string.gsub(name,directory_separator,'.')
+  return string.sub(s,1,-3)
+end
+
+-- current_module : () -> (string)
+local function current_modname (env)
+  return filename_to_modulename(env.filename)
+end
+
+local function expand_typealias(env, t)
+  assert(t.tag == "TSymbol")
+  local name = t[1]
+  local s = tlst.get_typealias(env, name)
+  if s then
+    t[1] = s
+  end
+end
+
 local function kindcheck (env, t)
   if t.tag == "TLiteral" then
   elseif t.tag == "TBase" then
@@ -105,6 +127,7 @@ local function kindcheck (env, t)
       kindcheck(env,field)
     end
   elseif t.tag == "TSymbol" then
+    expand_typealias(env, t)
     local name = t[1]
     local args = t[2]
     
@@ -388,7 +411,10 @@ local function check_parameters (env, parlist, selfimplicit, pos)
       if not parlist[i][2] then parlist[i][2] = Any end
       l[i] = parlist[i][2]
       env.variance = env.variance * -1
-      kindcheck(env,l[i])
+      if not kindcheck_success(env,l[i]) then
+        parlist[i][2] = Any
+        l[i] = Any
+      end
       env.variance = env.variance * -1
     end
     if parlist[len].tag == "Dots" then
@@ -765,7 +791,9 @@ local function check_return_type (env, inf_type, dec_type, pos)
   if tltype.isUnionlist(dec_type) then
     dec_type = tltype.unionlist2tuple(dec_type)
   end
-  kindcheck(env,dec_type)
+  if not kindcheck_success(env,dec_type) then
+    dec_type = Any
+  end
   if tltype.subtype(env, inf_type, dec_type) then
   elseif tltype.consistent_subtype(env, inf_type, dec_type) then
     msg = string.format(msg, tltype.tostring(inf_type), tltype.tostring(dec_type))
@@ -797,7 +825,9 @@ local function check_function (env, exp)
   -- kindcheck all type parameter bounds
   for i,tpar in ipairs(tpars) do
     local name, variance, tbound = tpar[1], tpar[2], tpar[3]
-    kindcheck(env, tbound)
+    if not kindcheck_success(env, tbound) then
+      tpar[3] = Any
+    end
   end  
   local input_type = check_parameters(env, idlist, false, exp.pos)
   local t = tltype.Function(tpars, input_type, ret_type)
@@ -1704,11 +1734,12 @@ local function get_elem_types (env, elems)
 end
 
 -- check_constructor_supercall : (env, id, explist, type) -> ()
-local function check_constructor_supercall (env, supercons_name, super_targs, super_args, tparent)
-  local constructor = tltype.getField(env, tltype.Literal(supercons_name[1]), tparent)
+local function check_constructor_supercall (env, supercons_name, super_args, tsuper_inst, tsuper_class)
+  local constructor = tltype.getField(env, tltype.Literal(supercons_name[1]), tsuper_class)
+  
   if not constructor then
     local msg = "superclass constructor %s called, but superclass %s does not have a constructor with that name."
-    msg = string.format(msg, supercons_name[1], tltype.tostring(tparent))
+    msg = string.format(msg, supercons_name[1], tltype.tostring(tsuper_inst))
     typeerror(env, "call", msg, supercons_name.pos)
   else
     check_explist(env, super_args)
@@ -1717,7 +1748,7 @@ local function check_constructor_supercall (env, supercons_name, super_targs, su
     local tpars = constructor[3]
     for i,tpar in ipairs(tpars) do
       local name = tpar[1]
-      t = tltype.substitute(t, name, super_targs[i])
+      t = tltype.substitute(t, name, tsuper_inst[2][i])
     end
     
     local inferred_type = arglist2type(super_args, env.strict)
@@ -1736,7 +1767,7 @@ local function check_constructor_self (env, tself, pos)
   end
 end
 
-local function check_constructor (env, elem, instance_members, parent_members, parent, supertargs)
+local function check_constructor (env, elem, instance_members, parent_members, tsuper_inst)
   local name, idlist, supercons_name, superargs, body, pos = elem[1], elem[2], elem[3], elem[4], elem[5], elem.pos
   tlst.begin_function(env)
   tlst.set_in_constructor(env)
@@ -1745,8 +1776,9 @@ local function check_constructor (env, elem, instance_members, parent_members, p
   local output_type = tltype.Tuple({ Nil }, true)
   local t = tltype.Function({}, input_type, output_type)
   if superargs ~= "NoSuperCall" then
-    if parent then 
-      check_constructor_supercall(env,supercons_name,supertargs,superargs,get_type(parent))
+    if tsuper_inst then
+      local tsuper_class = tlst.get_classtype(env, tsuper_inst[1])
+      check_constructor_supercall(env, supercons_name, superargs, tsuper_inst, tsuper_class)
     else
       local msg = "called superclass constructor, but %s has no superclass"
       msg = string.format(msg, name[1])
@@ -1820,6 +1852,10 @@ local function premethod_from_method (method, tinstance)
   local tinput = tvalue[1]
   local toutput = tvalue[2]
   
+  if not tinput then
+    assert(false)
+  end
+  
   assert(tltype.isSelf(tinput[1]))
   
   local new_tinput = {}
@@ -1861,14 +1897,14 @@ local function object_type_from_class(t)
 end
 
 -- get_superclass_fields : (env, type) -> ({string => field}, {string => field}, {string => field}) 
-local function get_superclass_fields(env, superclass, superargs)
-  local tsuperclass = get_type(superclass)
+local function get_superclass_fields(env, tsuper)
+  assert(tsuper.tag == "TSymbol")
+  
+  local superargs = tsuper[2]
+  local tsuperclass = tlst.get_classtype(env, tsuper[1])
+  assert(tsuperclass)
   local premethods = tltype.getField(env, tltype.Literal("__premethods"), tsuperclass)
-  assert(tsuperclass.class == true) --TODO: this should be transformed into a check
-  local t_superobject = object_type_from_class(tsuperclass)
-  assert(t_superobject.tag == "TSymbol")
-  local t_superobject_def = tltype.unfold(env, tltype.Symbol(t_superobject[1], superargs))
-  assert(t_superobject_def.tag == "TTable")
+  local t_superobject_def = tltype.unfold(env, tsuper)
   
   local members = {}
   local methods = {}
@@ -1930,7 +1966,9 @@ local function get_class_types(env, stm)
       return false
     end     
     local newelem = tltype.Field(member.const, tltype.Literal(k), member.ty) 
-    kindcheck(env, newelem)
+    if not kindcheck_success(env, newelem) then
+      newelem = tltype.Field(member.const, tltype.Literal(k), Any)
+    end
     instance_members[k] = newelem
     instance_fields[#instance_fields + 1] = newelem
   end
@@ -1949,8 +1987,10 @@ local function get_class_types(env, stm)
       typeerror(env, "inheritance", msg, method.id.pos)
       return false     
     end
-    kindcheck(env, method.ty)
-    local newelem = tltype.Field(true, tltype.Literal(k), method.ty) 
+    local newelem = tltype.Field(true, tltype.Literal(k), method.ty)
+    if not kindcheck_success(env, newelem) then
+      newelem = tltype.Field(true, tltype.Literal(k), Any)
+    end
     instance_methods[k] = newelem
     instance_fields[#instance_fields + 1] = newelem
   end
@@ -1992,65 +2032,45 @@ local function get_class_types(env, stm)
 end
 
 -- typechecks the inheritance clause. returns true iff it typechecks properly
-local function check_inheritance_clause (env, superclass, superargs)
-  assert(superclass.tag == "Id")
-  check_id(env, superclass)
-  local tsuperclass = get_type(superclass)
-  if not tsuperclass.class then
-    local msg = "type %s of parent %s is not a class type"
-    msg = string.format(msg, tltype.tostring(tsuperclass), superclass[1])
+local function check_inheritance_clause (env, tsuper)
+  if not kindcheck_success(env, tsuper) then
+    return false
+  end
+  local msg = "%s is not a class type"
+  msg = string.format(msg, tltype.tostring(tsuper))
+  if tsuper.tag ~= "TSymbol" then
     typeerror(env, "inheritance", msg, pos)
     return false
   end
-  local tsuperobject = object_type_from_class(tsuperclass)
-  assert(tsuperobject.tag == "TSymbol")
-  local supername = tsuperobject[1]
-  local tisuperobject = tlst.get_typeinfo(env, tsuperobject[1])
-  assert(tisuperobject.tag == "TINominal")
-  local superparams = tisuperobject[2]
-                     
-  if #superparams ~= #superargs then
-    local msg = "class %s expects %d type arguments but was supplied %d"
-    msg = string.format(msg,tsuperobject[1],#ksuperargs,#superargs)
-    typeerror(env, "kind", msg, superclass.pos)
-    return false
+  local tisuper = tlst.get_typeinfo(env, tsuper[1])
+  if tisuper.tag ~= "TINominal" then
+    typeerror(env, "inheritance", msg, pos)
+    return false    
   end
-  
-  local orig_variance = env.variance
-  for i,superarg in ipairs(superargs) do
-    local variance = superparams[i]
-    if variance == "Contravariant" then
-      env.variance = -1
-    elseif variance == "Invariant" then
-      env.variance = 0
-    else
-      env.variance = 1
-    end
-    if not kindcheck_success(env,superarg) then
-      return false
-    end 
+  if not tisuper.class then
+    typeerror(env, "inheritance", msg, pos)
+    return false    
   end
-  env.variance = orig_variance
   
   return true
 end
 
-local function check_class_code(env, elems, t_instance, instance_members, superclass_members, superclass, supertargs)
+local function check_class_code(env, elems, t_instance, instance_members, superclass_members, tsuper_inst)
   for _,elem in ipairs(elems) do
     if elem.tag == "ConcreteClassMethod" then
       local name,parlist,tret,body = elem[1], elem[2], elem[3], elem[4]
       check_method(env,parlist,tret,body,t_instance,elem.pos)
     elseif elem.tag == "ClassConstructor" then
-      check_constructor(env, elem, instance_members, superclass_members, superclass, supertargs)
+      check_constructor(env, elem, instance_members, superclass_members, tsuper_inst)
     else
       assert("expected class element, but got " .. elem.tag)
     end
   end  
 end
 
-local function new_check_class (env, stm)
-  local name, isAbstract, elems, superclass = stm[1], stm[2], stm[3], stm[4]
-  local t_params, superargs, is_local = stm[5], stm[6], stm.is_local
+local function check_class (env, stm)
+  local name, isAbstract, elems, tsuper_inst = stm[1], stm[2], stm[3], stm[4]
+  local t_params, is_local = stm[5], stm.is_local
   
   if tlst.get_typeinfo(env, name[1]) then
     local msg = "attempt to redeclare type '%s'"
@@ -2082,21 +2102,25 @@ local function new_check_class (env, stm)
   env.variance = orig_variance  
   
   --check that inheritance clause is well formed
-  if superclass ~= "NoParent" then
-    if not check_inheritance_clause(env, superclass, superargs) then
+  if tsuper_inst ~= "NoParent" then
+    if not check_inheritance_clause(env, tsuper_inst) then
       tlst.end_scope(env)
       return false
     end
   end
   
+  local typename = current_modname(env) .. name[1]
+  local typealias = name[1]
+    
   --insert all nominal subtyping edges from inheritance into
   --environment, with nil type definitions (since we are only using them for subtyping for now)
   --name, t_params, superclass, superargs
-  local ti_class_instance = tlst.typeinfo_Nominal(name[1], nil, t_params)
-  tlst.set_typeinfo(env, name[1], ti_class_instance, true)
+  local ti_class_instance = tlst.typeinfo_Nominal(name[1], nil, t_params, true)
+  tlst.set_typeinfo(env, typename, ti_class_instance, true)
+  tlst.set_typealias(env, typealias, typename)
   
-  if superclass ~= "NoParent" then
-    tlst.add_nominal_edge(env, name[1], superclass[1], superargs, tltype.substitute)
+  if tsuper_inst ~= "NoParent" then
+    tlst.add_nominal_edge(env, typename, tsuper_inst[1], tsuper_inst[2], tltype.substitute)
   end
   
   -- checks subtyping between parent instantiation and child class
@@ -2105,37 +2129,42 @@ local function new_check_class (env, stm)
   
   if success then
     --add complete nominal type and subtyping edge
-    ti_class_instance = tlst.typeinfo_Nominal(name[1], t_instance, t_params)
-    tlst.set_typeinfo(env, name[1], ti_class_instance, true)
-    if superclass ~= "NoParent" then
-      tlst.add_nominal_edge(env, name[1], superclass[1], superargs, tltype.substitute)
+    ti_class_instance = tlst.typeinfo_Nominal(typename, t_instance, t_params, true)
+    tlst.set_typeinfo(env, typename, ti_class_instance, true)
+    if tsuper_inst ~= "NoParent" then
+      tlst.add_nominal_edge(env, typename, tsuper_inst[1], tsuper_inst[2], tltype.substitute)
     end
     
     --check methods and constructors
-    if superclass ~= "NoParent" then
-      local t_superclass = get_type(superclass)
+    if tsuper_inst ~= "NoParent" then
+      local t_superclass = tlst.get_classtype(env, tsuper_inst[1])
       tlst.set_tsuper(env, t_superclass)
     else
       tlst.set_tsuper(env, "None")
     end
     local t_param_symbols = {}
     for i,v in ipairs(t_params) do t_param_symbols[i] = tltype.Symbol(v[1],{}) end    
-    local t_instance_symbol = tltype.Symbol(name[1], t_param_symbols)
-    check_class_code(env, elems, t_instance_symbol, instance_members, superclass_members, superclass, superargs)
+    local t_instance_symbol = tltype.Symbol(typename, t_param_symbols)
+    check_class_code(env, elems, t_instance_symbol, instance_members, superclass_members, tsuper_inst)
     
     --pop off the portion of the environment containing type parameters
     tlst.end_scope(env)
     
     -- add instance typeinfo and class identifier to environment
-    tlst.set_typeinfo(env, name[1], ti_class_instance, true)
-    if superclass ~= "NoParent" then
-      tlst.add_nominal_edge(env, name[1], superclass[1], superargs, tltype.substitute)
+    tlst.set_typeinfo(env, typename, ti_class_instance, true)
+    tlst.set_typealias(env, typealias, typename)
+    if tsuper_inst ~= "NoParent" then
+      --TODO: note that superclass[1] should be the name of the superclass type, NOT the superclass
+      --value.
+      tlst.add_nominal_edge(env, typename, tsuper_inst[1], tsuper_inst[2], tltype.substitute)
     end
     set_type(env, name, t_class)
+    tlst.set_classtype(env, typename, t_class)
     tlst.set_local(env, name)
   else
     tlst.end_scope(env)
     set_type(env, name, Any)
+    tlst.set_classtype(env, typename, Any)
     tlst.set_local(env, name)
   end
 end
@@ -2286,7 +2315,7 @@ function check_stm (env, stm)
   elseif tag == "Interface" then
     return check_interface(env, stm)
   elseif tag == "Class" then
-    return new_check_class(env,stm)
+    return check_class(env,stm)
   else
     error("cannot type check statement " .. tag)
   end

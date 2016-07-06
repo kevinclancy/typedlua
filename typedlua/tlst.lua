@@ -22,6 +22,7 @@ function tlst.new_env (subject, filename, strict)
   env.variance = 1
   
   env.nominal = {}
+  env.class_types = {}
   env["function"] = {}
   
   --maps typenames to typeinfos
@@ -49,8 +50,8 @@ function tlst.typeinfo_Structural (t)
 end
 
 -- (string,type,{tpar}) -> (typeinfo)
-function tlst.typeinfo_Nominal (name, t, tpars)
-  return { tag = "TINominal", name = name, [1] = t, [2] = tpars}
+function tlst.typeinfo_Nominal (name, t, tpars, is_class)
+  return { tag = "TINominal", name = name, class = is_class, [1] = t, [2] = tpars }
 end
 
 -- (type) -> (typeinfo)
@@ -149,6 +150,17 @@ function tlst.add_nominal_edge (env, source, dest, instantiation, subst)
   end
 end
 
+-- get_classtype : (env, string) -> (type?)
+function tlst.get_classtype(env, name)
+  return env.class_types[name]
+end
+
+--set_classtype : (env, string, type) -> ()
+function tlst.set_classtype(env, name, t)
+  assert(env.class_types[name] == nil)
+  env.class_types[name] = t
+end
+
 -- new_scope : () -> (senv)
 local function new_scope ()
   local senv = {}
@@ -157,6 +169,7 @@ local function new_scope ()
   senv["local"] = {}
   senv["unused"] = {}
   senv.types = {}
+  senv.type_aliases = {}
   senv.nominal_edges = {}
   return senv
 end
@@ -274,6 +287,20 @@ end
 function tlst.unused (env)
   local scope = env.scope
   return env[scope]["unused"]
+end
+
+-- set_typealias : (env, string, string) -> (string)
+function tlst.set_typealias (env, alias, typename)
+  env[env.scope].type_aliases[alias] = typename
+end
+
+-- get_typealias : (env, string) -> (string?)
+function tlst.get_typealias (env, alias)
+  for s = env.scope, 1, -1 do
+    local typename = env[s].type_aliases[alias]
+    if typename then return typename end
+  end
+  return nil
 end
 
 -- set_typeinfo : (env,name,typeinfo,bool) -> ()

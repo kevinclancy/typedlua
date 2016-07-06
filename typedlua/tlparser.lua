@@ -22,44 +22,6 @@ local function chainl1 (pat, sep)
   return lpeg.Cf(pat * lpeg.Cg(sep * pat)^0, tlast.exprBinaryOp)
 end
 
---[[
-Here is my initial plan for a class system.
-
-new keywords:
--class
--abstract
--method
--field
--constructor
--finalizer
-
---declaration modeled after interface syntax
-local [abstract] class Foo
-  field x : number --concrete field x, must be assigned in constructor or error is raised
-  abstract field z : nnumber --abstract field, only allowed on abstract classes
-
-  init(x : number, y : number)
-    self.x = x --self.x must be assigned to an integer since a concrete field was declared
-    print(y)
-  end
-  
-  init secondInit(x : number)
-    --an alternative named constructor
-  end
-  
-  fin
-    self.obj:freeResources()
-    --cleanup happens here
-  end
-
-  method doit(y : number, x : number, ... : number) : number
-    self.x = y
-    return 3
-  end
-end
-
-]]
-
 local G = lpeg.P { "TypedLua";
   TypedLua = tllexer.Shebang^-1 * tllexer.Skip * lpeg.V("Chunk") * -1 +
              tllexer.report_error();
@@ -128,7 +90,7 @@ local G = lpeg.P { "TypedLua";
   FieldType = lpeg.Cp() * lpeg.V("Type") * lpeg.Cc(tltype.Nil()) / tltype.PUnion;
   TypeArgs = lpeg.Ct(tllexer.symb('<') * lpeg.V("Type") * (tllexer.symb(",") * lpeg.V("Type"))^0 * 
                      tllexer.symb('>'));
-  VariableType = lpeg.Cp() * tllexer.token(tllexer.Name, "Type") * 
+  VariableType = lpeg.Cp() * tllexer.token(tllexer.TypeName, "Type") * 
                  (lpeg.V("TypeArgs") + lpeg.Cc({})) / tltype.PSymbol;
   RetType = lpeg.Cp() * lpeg.V("NilableTuple") +
             lpeg.V("Type") * lpeg.Carg(2) / tltype.retType;
@@ -204,9 +166,8 @@ local G = lpeg.P { "TypedLua";
                  (tllexer.kw("abstract") * lpeg.Cc(true) + lpeg.Cc(false)) * 
                  tllexer.kw("class") * lpeg.V("Id") * (lpeg.V("TypeParams") + lpeg.Cc({})) * 
                  (tllexer.kw("extends") * 
-                  lpeg.V("Id") * 
-                  (lpeg.V("TypeArgs") + lpeg.Cc({})) + 
-                  lpeg.Cc("NoParent") * lpeg.Cc({})) *
+                  lpeg.V("Type") + 
+                  lpeg.Cc("NoParent")) *
                  lpeg.Ct(lpeg.V("ClassElement")^0) * tllexer.kw("end") / tlast.statClass;
              
   -- parser

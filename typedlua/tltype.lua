@@ -796,6 +796,11 @@ end
 function tltype.unfold (env, t)
   if t.tag == "TSymbol" then
     local ti = tlst.get_typeinfo(env,t[1])
+    
+    if ti == nil then
+      assert(false)
+    end
+    
     if ti.tag == "TIUserdata" then
       return ti[1]
     elseif ti.tag == "TIStructural" then

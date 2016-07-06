@@ -218,8 +218,8 @@ function tlast.statInterface (pos, name, t)
 end
 
 --statClass : (number, boolean, string, {tpar}|"NoParams", class|"NoParent", {Type}|"NoArgs", class_element_array, ident) -> (stat)
-function tlast.statClass(pos,isAbstract,name,tpars,superclass,superargs,elems)
-  return { tag = "Class", pos = pos, [1] = name, [2] = isAbstract, [3] = elems, [4] = superclass, [5] = tpars, [6] = superargs} 
+function tlast.statClass(pos,isAbstract,name,tpars,tsuper,elems)
+  return { tag = "Class", pos = pos, [1] = name, [2] = isAbstract, [3] = elems, [4] = tsuper, [5] = tpars } 
 end
 
 -- statUserdata : (number, string, type) -> (stat)
