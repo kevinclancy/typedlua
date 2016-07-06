@@ -4,8 +4,19 @@ This module implements Typed Lua symbol table.
 
 local tlst = {}
 
--- new_env : (string, string, boolean) -> (env)
-function tlst.new_env (subject, filename, strict)
+-- new_globalenv 
+function tlst.new_globalenv()
+  local genv = {}
+  genv.nominal = {}
+  genv.class_types = {}
+  genv.types = {}
+  genv.nominal_edges = {}
+  genv.loaded = {}
+  return genv
+end
+
+-- new_env : (string, string, boolean, genv?) -> (env)
+function tlst.new_env (subject, filename, strict, genv)
   local env = {}
   env.subject = subject
   env.filename = filename
@@ -14,26 +25,12 @@ function tlst.new_env (subject, filename, strict)
   env.integer = false
   env.messages = {}
   env.maxscope = 0
-  env.tsuperclass = nil
   env.scope = 0
   env.fscope = 0
   env.loop = 0
-  
   env.variance = 1
-  
-  env.nominal = {}
-  env.class_types = {}
   env["function"] = {}
-  
-  --maps typenames to typeinfos
-  --a typeinfo has a kind(field "kind"), a type(field "type"), a classifier (field "class") (userdata, nominal, or structural)
-  env.types = {}
-  
-  --maps a typeinfo to a typeinfo,{type} pair. This should include all
-  --nominal edges that have been transitively deduced in the global scope
-  env.nominal_edges = {}
-
-  env["loaded"] = {}
+  env.genv = genv or tlst.new_globalenv()
   return env
 end
 
@@ -69,7 +66,15 @@ function tlst.get_all_nominal_edges (env, tisource, edge_map_out)
         end
       end
     end
-  end  
+  end
+  
+  if env.genv.nominal_edges[tisource] then
+    for _,edges in pairs(env.genv.nominal_edges[tisource]) do
+      for k,edge in ipairs(edges) do
+        edge_map_out[k] = edge
+      end
+    end    
+  end
 end
 
 -- get_nominal_edges : (env,typeinfo,typeinfo,out {{type}}) -> ()
@@ -98,10 +103,19 @@ function tlst.get_nominal_edges (env, tisource, tidest, array_out)
       end
     end
   end  
+  
+  if env.genv.nominal_edges[tisource] then
+    local edges = env.genv.nominal_edges[tisource][tidest]
+    if edges then
+      for _,edge in ipairs(edges) do
+        array_out[#array_out + 1] = edge
+      end
+    end    
+  end
 end
 
 -- (env, string, string, {type}, (type, string, type) -> (type)) -> ()
-function tlst.add_nominal_edge (env, source, dest, instantiation, subst)
+function tlst.add_nominal_edge (env, source, dest, instantiation, subst, is_local)
   local s = env.scope
   
   local ti_source = tlst.get_typeinfo(env,source)
@@ -114,16 +128,18 @@ function tlst.add_nominal_edge (env, source, dest, instantiation, subst)
   local dest_edges = {}
   tlst.get_all_nominal_edges(env, ti_dest, dest_edges)
   
+  local nominal_edges = is_local and env[s].nominal_edges or env.genv.nominal_edges
+  
   -- add direct edge
-  env[s].nominal_edges[ti_source] = env[s].nominal_edges[ti_source] or {}
-  local src_edges = env[s].nominal_edges[ti_source]
+  nominal_edges[ti_source] = nominal_edges[ti_source] or {}
+  local src_edges = nominal_edges[ti_source]
   src_edges[ti_dest] = src_edges[ti_dest] or {}
   local src_dest_edges = src_edges[ti_dest]
   src_dest_edges[#src_dest_edges + 1] = { path = {ti_source}, inst = instantiation }
   
   -- add transitive edges
   for ti_parent,edge in ipairs(dest_edges) do
-    local edges_to_parent = src_edges[ti_parent]
+    local edges_to_parent = src_edges[ti_dest]
     
     --checking for cycles should be done externally
     assert(ti_parent ~= ti_source)
@@ -138,7 +154,7 @@ function tlst.add_nominal_edge (env, source, dest, instantiation, subst)
         new_inst[j] = subst(t,name,tinst)
       end
       
-      new_instantiation[j] = new_inst
+      new_instantiation[i] = new_inst
     end
     
     local new_path = {tisource}
@@ -151,14 +167,22 @@ function tlst.add_nominal_edge (env, source, dest, instantiation, subst)
 end
 
 -- get_classtype : (env, string) -> (type?)
-function tlst.get_classtype(env, name)
-  return env.class_types[name]
+function tlst.get_classtype (env, name)
+  for s = env.scope, 1, -1 do
+    local typename = env[s].class_types[name]
+    if typename then return typename end
+  end
+  return env.genv.class_types[name]
 end
 
 --set_classtype : (env, string, type) -> ()
-function tlst.set_classtype(env, name, t)
-  assert(env.class_types[name] == nil)
-  env.class_types[name] = t
+function tlst.set_classtype (env, name, t, is_local)
+  assert(tlst.get_classtype(env, name) == nil)
+  if is_local then
+    env[env.scope].class_types[name] = t
+  else
+    env.genv.class_types[name] = t
+  end
 end
 
 -- new_scope : () -> (senv)
@@ -168,7 +192,11 @@ local function new_scope ()
   senv["label"] = {}
   senv["local"] = {}
   senv["unused"] = {}
+  --instance types
   senv.types = {}
+  senv.tsuper = nil
+  --class types
+  senv.class_types = {}
   senv.type_aliases = {}
   senv.nominal_edges = {}
   return senv
@@ -309,7 +337,7 @@ function tlst.set_typeinfo (env, name, ti, is_local)
     local scope = env.scope
     env[scope].types[name] = ti
   else
-    env.types[name] = ti
+    env.genv.types[name] = ti
   end
 end
 
@@ -320,7 +348,7 @@ function tlst.get_typeinfo (env, name)
     local t = env[s].types[name]
     if t then return t end
   end
-  return env.types[name]
+  return env.genv.types[name]
 end
 
 -- new_fenv : () -> (fenv)
@@ -366,7 +394,6 @@ end
 function tlst.get_in_constructor(env)
   return env["function"][env.fscope].in_constructor
 end
-
 
 -- set_return_type : (env, type) -> ()
 function tlst.set_return_type (env, t)

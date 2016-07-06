@@ -53,6 +53,7 @@ local directory_separator = string.sub(package.config,1,1)
 -- filename_to_modulename : (string) -> (string)
 local function filename_to_modulename (name)
   local s = string.gsub(name,directory_separator,'.')
+  s = string.match(s, "[^%p].*")
   return string.sub(s,1,-3)
 end
 
@@ -369,14 +370,13 @@ local function check_tl (env, name, path, pos)
     typeerror(env, "syntax", msg, pos)
     return Any
   end
-  env.subject = subject
-  env.filename = path
-  tlst.begin_function(env)
-  check_block(env, ast)
-  local t1 = tltype.first(infer_return_type(env))
-  tlst.end_function(env)
-  env.subject = s
-  env.filename = f
+  local new_env = tlst.new_env(subject, path, env.strict, env.genv) 
+  new_env.subject = subject
+  new_env.filename = path
+  tlst.begin_function(new_env)
+  check_block(new_env, ast)
+  local t1 = tltype.first(infer_return_type(new_env))
+  tlst.end_function(new_env)
   return t1
 end
 
@@ -468,23 +468,24 @@ end
 
 local function check_require (env, name, pos, extra_path)
   extra_path = extra_path or ""
-  if not env["loaded"][name] then
+  local genv = env.genv
+  if not genv["loaded"][name] then
     local path = string.gsub(package.path..";", "[.]lua;", ".tl;")
     local filepath, msg1 = searchpath(extra_path .. name, path)
     if filepath then
       if string.find(filepath, env.parent) then
-        env["loaded"][name] = Any
+        genv["loaded"][name] = Any
         typeerror(env, "load", "circular require", pos)
       else
-        env["loaded"][name] = check_tl(env, name, filepath, pos)
+        genv["loaded"][name] = check_tl(env, name, filepath, pos)
       end
     else
       path = string.gsub(package.path..";", "[.]lua;", ".tld;")
       local filepath, msg2 = searchpath(extra_path .. name, path)
       if filepath then
-        env["loaded"][name] = check_tld(env, name, filepath, pos)
+        genv["loaded"][name] = check_tld(env, name, filepath, pos)
       else
-        env["loaded"][name] = Any
+        genv["loaded"][name] = Any
         local s, m = pcall(require, name)
         if not s then
           if string.find(m, "syntax error") then
@@ -498,7 +499,7 @@ local function check_require (env, name, pos, extra_path)
       end
     end
   end
-  return env["loaded"][name]
+  return genv["loaded"][name]
 end
 
 local function check_arith (env, exp, op)
@@ -2151,7 +2152,7 @@ local function check_class (env, stm)
     tlst.end_scope(env)
     
     -- add instance typeinfo and class identifier to environment
-    tlst.set_typeinfo(env, typename, ti_class_instance, true)
+    tlst.set_typeinfo(env, typename, ti_class_instance, env.scope > 1)
     tlst.set_typealias(env, typealias, typename)
     if tsuper_inst ~= "NoParent" then
       --TODO: note that superclass[1] should be the name of the superclass type, NOT the superclass
@@ -2159,12 +2160,12 @@ local function check_class (env, stm)
       tlst.add_nominal_edge(env, typename, tsuper_inst[1], tsuper_inst[2], tltype.substitute)
     end
     set_type(env, name, t_class)
-    tlst.set_classtype(env, typename, t_class)
+    tlst.set_classtype(env, typename, t_class, env.scope > 1)
     tlst.set_local(env, name)
   else
     tlst.end_scope(env)
     set_type(env, name, Any)
-    tlst.set_classtype(env, typename, Any)
+    tlst.set_classtype(env, typename, Any, true)
     tlst.set_local(env, name)
   end
 end
