@@ -73,26 +73,45 @@ end
 
 local function kindcheck (env, t)
   if t.tag == "TLiteral" then
+    return true
   elseif t.tag == "TBase" then
+    return true
   elseif t.tag == "TNil" then
+    return true
   elseif t.tag == "TValue" then
+    return true
   elseif t.tag == "TAny" then
+    return true
   elseif t.tag == "TSelf" then
+    return true
   elseif t.tag == "TVoid" then
+    return true
   elseif t.tag == "TUnion" then
-    for _,elem in ipairs(t) do
-      kindcheck(env,elem)
+    for i,elem in ipairs(t) do
+      if not kindcheck(env, elem) then
+        t[i] = Any
+      end
     end
+    return true
   elseif t.tag == "TVarArg" then
-    kindcheck(t[1])
+    if not kindcheck(env, t[1]) then
+      t[1] = Any
+    end
+    return true
   elseif t.tag == "TTuple" then
-    for _, elem in ipairs(t) do
-      kindcheck(env,elem)
+    for i,elem in ipairs(t) do
+      if not kindcheck(env,elem) then
+        t[i] = Any
+      end
     end
+    return true
   elseif t.tag == "TUnionList" then
-    for _,elem in ipairs(t) do
-      kindcheck(env,elem)
+    for i,elem in ipairs(t) do
+      if not kindcheck(env,elem) then
+        t[i] = Any
+      end
     end
+    return true
   elseif t.tag == "TFunction" then
     tlst.begin_scope(env)
     env.variance = env.variance * -1
@@ -105,28 +124,45 @@ local function kindcheck (env, t)
     end
     for i,tpar in ipairs(t[3]) do
       local tbound = tpar[3]
-      kindcheck(env, tbound)
+      if not kindcheck(env, tbound) then
+        tpar[3] = Any
+      end
     end  
-    kindcheck(env,t[1])
+    if not kindcheck(env, t[1]) then
+      t[1] = Any
+    end
     env.variance = env.variance * -1
-    kindcheck(env,t[2])
+    if not kindcheck(env, t[2]) then
+      t[2] = Any
+    end
     tlst.end_scope(env)
+    return true
   elseif t.tag == "TField" then
     env.variance = env.variance * -1
-    kindcheck(env,t[1])
+    if not kindcheck(env,t[1]) then
+      t[1] = Any
+    end
     env.variance = env.variance * -1
     if tltype.isConstField(t) then
-      kindcheck(env,t[2])
+      if not kindcheck(env,t[2]) then
+        t[2] = Any
+      end
     else
       local orig_variance = env.variance
       env.variance = 0
-      kindcheck(env,t[2])
+      if not kindcheck(env,t[2]) then
+        t[2] = Any
+      end
       env.variance = orig_variance      
     end
+    return true
   elseif t.tag == "TTable" then
-    for _,field in ipairs(t) do
-      kindcheck(env,field)
+    for i,field in ipairs(t) do
+      if not kindcheck(env,field) then
+        t[i] = Any
+      end
     end
+    return true
   elseif t.tag == "TSymbol" then
     expand_typealias(env, t)
     local name = t[1]
@@ -136,6 +172,7 @@ local function kindcheck (env, t)
     if not ti then
       local msg = string.format("Undeclared type %s", name)
       typeerror(env, "kind", msg, t.pos)
+      return false
     else
       if ti.tag == "TINominal" then
         local tpars = ti[2]
@@ -143,14 +180,9 @@ local function kindcheck (env, t)
         if #tpars ~= #args then
           local msg = string.format("%s expected %d arguments but received %d",name,#tpars,#args)
           typeerror(env, "kind", msg, t.pos)
+          return false
         else
           for i,tpar in ipairs(tpars) do
-            local bound = tpar[3]
-            if not (bound == "NoBound" or tltype.subtype(env, args[i], bound)) then
-              local msg = string.format("%s is not a subtype of %s", tltype.tostring(args[i]), tltype.tostring(bound))
-              typeerror(env, "kind", msg, args[i].pos)
-            end
-            
             local variance = tpar[2]
             if variance == "Covariant" then
               kindcheck(env,args[i])
@@ -164,40 +196,49 @@ local function kindcheck (env, t)
               kindcheck(env,args[i])
               env.variance = orig_variance
             end
+            
+            local bound = tpar[3]
+            if not (bound == "NoBound" or tltype.subtype(env, args[i], bound)) then
+              local msg = string.format("%s is not a subtype of %s", tltype.tostring(args[i]), tltype.tostring(bound))
+              typeerror(env, "kind", msg, args[i].pos)
+              args[i] = Any
+            end
           end
+          return true
         end
       elseif ti.tag == "TIVariable" then
         if #args > 0 then
           local msg = string.format("Only class/interface types should be supplied type arguments")
           typeerror(env, "kind", msg, t.pos)
+          return false
         end
         if ti[2] == "Covariant" and env.variance <= 0 then
           local msg = "Contravariant usage of covariant type variable %s"
           msg = string.format(msg, name)
           typeerror(env, "kind", msg, t.pos)
+          return false
         elseif ti[2] == "Contravariant" and env.variance >= 0 then
           local msg = "Covariant usage of contravariant type variable %s"
           msg = string.format(msg, name)
           typeerror(env, "kind", msg, t.pos)
+          return false
         end
       else
         if #args > 0 then
           local msg = string.format("Only class/interface types should be supplied type arguments")
           typeerror(env, "kind", msg, t.pos)
+          return false
         end        
       end
     end
   elseif t.tag == "TVararg" then
-    kindcheck(env, t[1])
+    if not kindcheck(env, t[1]) then
+      t[1] = Any
+    end
+    return true
   else
-    assert("type substitution error: expected type, got " .. t.tag) 
+    assert("kind checking error: expected type, got " .. t.tag) 
   end  
-end
-
-local function kindcheck_success (env, t)
-  local orig_messages = #env.messages
-  kindcheck(env,t)
-  return #env.messages == orig_messages
 end
 
 local function check_self (env, torig, t, pos)
@@ -411,7 +452,7 @@ local function check_parameters (env, parlist, selfimplicit, pos)
       if not parlist[i][2] then parlist[i][2] = Any end
       l[i] = parlist[i][2]
       env.variance = env.variance * -1
-      if not kindcheck_success(env, l[i]) then
+      if not kindcheck(env, l[i]) then
         parlist[i][2] = Any
         l[i] = Any
       end
@@ -792,9 +833,6 @@ local function check_return_type (env, inf_type, dec_type, pos)
   if tltype.isUnionlist(dec_type) then
     dec_type = tltype.unionlist2tuple(dec_type)
   end
-  if not kindcheck_success(env,dec_type) then
-    dec_type = Any
-  end
   if tltype.subtype(env, inf_type, dec_type) then
   elseif tltype.consistent_subtype(env, inf_type, dec_type) then
     msg = string.format(msg, tltype.tostring(inf_type), tltype.tostring(dec_type))
@@ -807,6 +845,10 @@ end
 
 local function check_function (env, exp)
   local idlist, ret_type, block, tpars = exp[1], exp[2], exp[3], exp[4]
+  if not kindcheck(env, ret_type) then
+    ret_type = Any
+    exp[2] = Any
+  end
   local infer_return = false
   if not block then
     assert(false) -- I'd like to know when this happens
@@ -826,7 +868,7 @@ local function check_function (env, exp)
   -- kindcheck all type parameter bounds
   for i,tpar in ipairs(tpars) do
     local name, variance, tbound = tpar[1], tpar[2], tpar[3]
-    if not kindcheck_success(env, tbound) then
+    if not kindcheck(env, tbound) then
       tpar[3] = Any
     end
   end  
@@ -1260,6 +1302,10 @@ end
 
 local function check_localrec (env, id, exp)
   local idlist, ret_type, block = exp[1], exp[2], exp[3]
+  if not kindcheck(env, ret_type) then
+    ret_type = Any
+    exp[2] = Any
+  end
   local infer_return = false
   if not block then
     block = ret_type
@@ -1926,7 +1972,46 @@ local function get_superclass_fields(env, tsuper)
   return members, methods, fields
 end
 
---kindchecks all of the class's elements
+--kindchecks the types ascribed to the provided class elements
+local function kindcheck_class_elems(env, elems)
+  for _,elem in ipairs(elems) do
+    if elem.tag == "ConcreteClassMethod" then
+      local parlist,tret = elem[2], elem[3]
+      env.variance = env.variance * -1      
+      for i,par in ipairs(parlist) do
+        if not kindcheck(env, par[2]) then
+          par[2] = Any
+        end
+      end
+      env.variance = env.variance * -1
+      if not kindcheck(env, tret) then
+        elem[3] = Any
+      end
+    elseif elem.tag == "ClassConstructor" then
+      local parlist = elem[2]
+      env.variance = env.variance * -1
+      for i,par in ipairs(parlist) do
+        if not kindcheck(env, par[2]) then
+          par[2] = Any
+        end
+      end      
+      env.variance = env.variance * -1
+    elseif elem.tag == "ConcreteClassField" then
+      local const, ty = elem.const, elem[2]
+      local orig_variance = env.variance
+      if not const then
+        env.variance = 0
+      end
+      if not kindcheck(env, ty) then
+        elem[2] = Any
+      end
+      env.variance = orig_variance
+    else
+      assert("expected class element, but got " .. elem.tag)
+    end    
+  end
+end
+
 --returns instance_type, class_type for the given class value
 --(env,stm) -> (type,type)
 local function get_class_types(env, stm)
@@ -1969,9 +2054,6 @@ local function get_class_types(env, stm)
       return false
     end     
     local newelem = tltype.Field(member.const, tltype.Literal(k), member.ty) 
-    if not kindcheck_success(env, newelem) then
-      newelem = tltype.Field(member.const, tltype.Literal(k), Any)
-    end
     instance_members[k] = newelem
     instance_fields[#instance_fields + 1] = newelem
   end
@@ -1991,9 +2073,6 @@ local function get_class_types(env, stm)
       return false     
     end
     local newelem = tltype.Field(true, tltype.Literal(k), method.ty)
-    if not kindcheck_success(env, newelem) then
-      newelem = tltype.Field(true, tltype.Literal(k), Any)
-    end
     instance_methods[k] = newelem
     instance_fields[#instance_fields + 1] = newelem
   end
@@ -2036,7 +2115,7 @@ end
 
 -- typechecks the inheritance clause. returns true iff it typechecks properly
 local function check_inheritance_clause (env, tsuper)
-  if not kindcheck_success(env, tsuper) then
+  if not kindcheck(env, tsuper) then
     return false
   end
   local msg = "%s is not a class type"
@@ -2096,7 +2175,7 @@ local function check_class (env, stm)
   env.variance = -1
   for i,tpar in ipairs(t_params) do
     local name, variance, tbound = tpar[1], tpar[2], tpar[3]
-    if not (tbound == "NoBound" or kindcheck_success(env, tbound)) then
+    if not (tbound == "NoBound" or kindcheck(env, tbound)) then
       env.variance = orig_variance
       tlst.end_scope(env)
       return false
@@ -2112,6 +2191,8 @@ local function check_class (env, stm)
     end
   end
   
+  
+  
   local typename = current_modname(env) .. name[1]
   local typealias = name[1]
     
@@ -2125,6 +2206,8 @@ local function check_class (env, stm)
   if tsuper_inst ~= "NoParent" then
     tlst.add_nominal_edge(env, typename, tsuper_inst[1], tsuper_inst[2], tltype.substitute)
   end
+  
+  kindcheck_class_elems(env, elems)
   
   -- checks subtyping between parent instantiation and child class
   -- kindchecks the types included in declarations

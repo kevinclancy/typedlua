@@ -1059,7 +1059,9 @@ local function subtype_symbol (assume, env, t1, t2, relation)
       return false
     end
   end
-  
+  if ti2 == nil then
+    assert(false)
+  end
   if t2_symbol and ti2.tag == "TIVariable" then
     return false
   end    
