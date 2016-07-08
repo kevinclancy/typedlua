@@ -413,6 +413,11 @@ function tlast.ident (pos, str, t)
   return { tag = "Id", pos = pos, [1] = str, [2] = t }
 end
 
+-- typeIdent : (number, string) -> (typeIdent)
+function tlast.typeIdent (pos, str)
+  return { tag = "TypeId", pos = pos, [1] = str } 
+end
+
 -- index : (number, expr, expr) -> (lhs)
 function tlast.index (pos, e1, e2)
   return { tag = "Index", pos = pos, [1] = e1, [2] = e2 }
@@ -466,6 +471,11 @@ function tlast.superinvoke(pos, e, ...)
     a[i + 1] = list[i]
   end
   return a  
+end
+
+-- classValueLookup : (number, typeId) -> (expr)
+function tlast.classValueLookup (pos, type_id)
+  return { tag = "ClassValueLookup", pos = pos, [1] = type_id }
 end
 
 -- setConst : (expr|field|id) -> (expr|field|id)
@@ -714,12 +724,10 @@ function exp2str (exp)
   elseif tag == "Function" then
     str = str .. "{ "
     str = str .. parlist2str(exp[1])
-    if exp[3] then
+    if exp[2] then
       str = str .. ":" .. type2str(exp[2])
-      str = str .. ", " .. block2str(exp[3])
-    else
-      str = str .. ", " .. block2str(exp[2])
     end
+    str = str .. ", " .. block2str(exp[3])
     str = str .. " }"
   elseif tag == "Table" then
     str = str .. fieldlist2str(exp)

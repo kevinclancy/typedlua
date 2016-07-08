@@ -462,7 +462,6 @@ function tltype.PinputTuple (pos, t, strict)
   return ret
 end
 
-
 -- outputTuple : (number, type?, boolean) -> (type)
 function tltype.outputTuple (t, strict)
   if not strict then
@@ -1048,6 +1047,10 @@ local function subtype_symbol (assume, env, t1, t2, relation)
   
   local ti1 = t1_symbol and tlst.get_typeinfo(env,t1[1])
   local ti2 = t2_symbol and tlst.get_typeinfo(env,t2[1])
+  
+  if not ((not t1_symbol) or ti1) then
+    assert(false)
+  end
   
   -- handle bounded variables
   if t1_symbol and ti1.tag == "TIVariable" then

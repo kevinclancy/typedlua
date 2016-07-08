@@ -3,7 +3,7 @@ This file implements the code generator for Typed Lua
 ]]
 local tlcode = {}
 
-local code_block, code_stm, code_exp, code_var
+local code_block, code_stm, code_exp, code_var, code_class_lookup
 local code_explist, code_varlist, code_fieldlist, code_idlist
 
 local function spaces (fmt)
@@ -118,33 +118,36 @@ local function code_parlist (parlist, fmt)
 end
 
 local function code_class (class, fmt)
-  local islocal, class_name, class_abstract = class.is_local, class[1][1], class[2]
-  local elems, superclass = class[3], class[4]
+  local islocal, class_alias, class_abstract = class.is_local, class[1][1], class[2]
+  local class_name = "'" .. class[1].global_name .. "'"
+  local elems, tsuperclass = class[3], class[4]
   local str = ""
-  if islocal then
-    str = str .. "local "
-  end
-  str = indent(str .. class_name .. " = { __premethods = {} } ", fmt)
   str = str .. " do "
-  if superclass ~= "NoParent" then 
-    str = str .. "local super = " .. superclass[1]
+  str = str .. "if not (debug.getregistry()).classes then (debug.getregistry()).classes = {} end "
+  str = str .. " (debug.getregistry()).classes[" .. class_name .. "] = { __premethods = {} }"
+  str = str .. "local class = (debug.getregistry()).classes[" .. class_name .. "]"
+  if tsuperclass ~= "NoParent" then
+    assert(tsuperclass.tag == "TSymbol")
+    local superclass_name = "'" .. tsuperclass[1] .. "'"
+    str = str .. "local super = (debug.getregistry()).classes[" .. superclass_name .. "] "
+    str = str .. "for k,v in pairs(super.__premethods) do class.__premethods[k] = v end "
   end
   for _,elem in ipairs(elems) do
     if elem.tag == "ClassConstructor" then
       local cons_name, parlist, supercons_name, superargs, body = elem[1][1], elem[2], elem[3], elem[4], elem[5]
       local supercall
-      str = str .. " function " .. class_name .. "." .. cons_name .. "(" .. code_parlist(parlist,fmt) .. ")"
-      if superclass and supercons_name ~= "NoSuperCall" then
+      str = str .. " function class." .. cons_name .. "(" .. code_parlist(parlist,fmt) .. ")"
+      if tsuperclass and supercons_name ~= "NoSuperCall" then
         str = str .. "local self = super." .. supercons_name[1] .. "(" .. code_explist(superargs) .. ") "
       else
         str = str .. "local self = {}"
       end
-      str = indent(str .. " setmetatable(self, { __index = " .. class_name .. ".__premethods })",fmt) 
+      str = indent(str .. " setmetatable(self, { __index = class.__premethods })",fmt) 
       str = str .. code_block(body, fmt)
       str = str .. indent("return self end",fmt)
     elseif elem.tag == "ConcreteClassMethod" then
       local method_name, parlist, tret, body = elem[1][1], elem[2], elem[3], elem[4]
-      str = indent(str .. " function " .. class_name .. ".__premethods:" .. method_name .. "(" .. code_parlist(parlist,fmt) .. ")",fmt)
+      str = indent(str .. " function class.__premethods:" .. method_name .. "(" .. code_parlist(parlist,fmt) .. ")",fmt)
       str = str .. code_block(body,fmt) .. indent("end",fmt)
     end
   end
@@ -201,6 +204,12 @@ function code_varlist (varlist, fmt)
   return table.concat(l, ", ")
 end
 
+function code_class_lookup (exp, fmt)
+  assert(exp.tag == "ClassValueLookup")
+  local global_typename = exp[1][1]
+  return " (debug.getregistry()).classes['" .. global_typename .. "']"
+end
+
 function code_exp (exp, fmt)
   local tag = exp.tag
   if tag == "Nil" then
@@ -218,11 +227,7 @@ function code_exp (exp, fmt)
   elseif tag == "Function" then
     local str = "function ("
     str = str .. code_parlist(exp[1], fmt) .. ") "
-    if not exp[3] then
-      str = str .. code_block(exp[2], fmt) .. indent("end", fmt)
-    else
-      str = str .. code_block(exp[3], fmt) .. indent("end", fmt)
-    end
+    str = str .. code_block(exp[3], fmt) .. indent("end", fmt)
     return str
   elseif tag == "Table" then
     local str = "{" .. code_fieldlist(exp, fmt) .. "}"
@@ -255,6 +260,8 @@ function code_exp (exp, fmt)
   elseif tag == "Id" or
          tag == "Index" then
     return code_var(exp, fmt)
+  elseif tag == "ClassValueLookup" then
+    return code_class_lookup(exp, fmt)
   else
     error("trying to generate code for a expression, but got a " .. tag)
   end

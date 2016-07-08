@@ -72,6 +72,9 @@ local function expand_typealias(env, t)
 end
 
 local function kindcheck (env, t)
+  if type(t) == "boolean" then
+    assert(false)
+  end
   if t.tag == "TLiteral" then
     return true
   elseif t.tag == "TBase" then
@@ -850,12 +853,6 @@ local function check_function (env, exp)
     exp[2] = Any
   end
   local infer_return = false
-  if not block then
-    assert(false) -- I'd like to know when this happens
-    block = ret_type
-    ret_type = tltype.Tuple({ Nil }, true)
-    infer_return = true
-  end
   tlst.begin_function(env)
   tlst.begin_scope(env)
   -- add type params to environment
@@ -1023,6 +1020,9 @@ local function check_call (env, exp)
   local exp1 = exp[1]
   local targs = exp[2]
   local explist = {}
+  for _,targ in ipairs(targs) do
+    kindcheck(env, targ)
+  end
   for i = 3, #exp do
     explist[i - 2] = exp[i]
   end
@@ -1225,6 +1225,20 @@ local function check_superinvoke(env, exp)
   return true
 end
 
+local function check_class_lookup(env, exp)
+  local typeid = exp[1][1]
+  local global_name = tlst.get_typealias(env, typeid)
+  if global_name then exp[1][1] = global_name end
+  local tclass = tlst.get_classtype(env, global_name or typeid)
+  if not tclass then
+    local msg = "%s is not a class or is not in scope"
+    msg = string.format(msg, typeid)
+    typeerror(env, "classlookup", msg, exp[1].pos)
+    return
+  end
+  set_type(env, exp, tclass)
+end
+
 local function check_local_var (env, id, inferred_type, close_local)
   local local_name, local_type, pos = id[1], id[2], id.pos
   if tltype.isMethod(inferred_type) then
@@ -1302,9 +1316,9 @@ end
 
 local function check_localrec (env, id, exp)
   local idlist, ret_type, block = exp[1], exp[2], exp[3]
-  if not kindcheck(env, ret_type) then
-    ret_type = Any
-    exp[2] = Any
+  if (ret_type == false) or (not kindcheck(env, ret_type)) then
+    ret_type = tltype.Tuple({Any}, true)
+    exp[2] = ret_type
   end
   local infer_return = false
   if not block then
@@ -2154,6 +2168,8 @@ local function check_class (env, stm)
   local name, isAbstract, elems, tsuper_inst = stm[1], stm[2], stm[3], stm[4]
   local t_params, is_local = stm[5], stm.is_local
   
+  name.global_name = current_modname(env) .. name[1]
+  
   if tlst.get_typeinfo(env, name[1]) then
     local msg = "attempt to redeclare type '%s'"
     msg = string.format(msg, name)
@@ -2190,8 +2206,6 @@ local function check_class (env, stm)
       return false
     end
   end
-  
-  
   
   local typename = current_modname(env) .. name[1]
   local typealias = name[1]
@@ -2244,14 +2258,9 @@ local function check_class (env, stm)
       --value.
       tlst.add_nominal_edge(env, typename, tsuper_inst[1], tsuper_inst[2], tltype.substitute)
     end
-    set_type(env, name, t_class)
     tlst.set_classtype(env, typename, t_class, env.scope > 1)
-    tlst.set_local(env, name)
   else
     tlst.end_scope(env)
-    set_type(env, name, Any)
-    tlst.set_classtype(env, typename, Any, true)
-    tlst.set_local(env, name)
   end
 end
 
@@ -2361,6 +2370,8 @@ function check_exp (env, exp)
     check_id(env, exp)
   elseif tag == "Index" then
     check_index(env, exp)
+  elseif tag == "ClassValueLookup" then
+    check_class_lookup(env, exp)
   else
     error("cannot type check expression " .. tag)
   end

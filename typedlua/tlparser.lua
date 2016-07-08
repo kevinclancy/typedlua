@@ -90,6 +90,7 @@ local G = lpeg.P { "TypedLua";
   FieldType = lpeg.Cp() * lpeg.V("Type") * lpeg.Cc(tltype.Nil()) / tltype.PUnion;
   TypeArgs = lpeg.Ct(tllexer.symb('<') * lpeg.V("Type") * (tllexer.symb(",") * lpeg.V("Type"))^0 * 
                      tllexer.symb('>'));
+  TypeId = lpeg.Cp() * tllexer.token(tllexer.TypeName, "TypeId") / tlast.typeIdent;
   VariableType = lpeg.Cp() * tllexer.token(tllexer.TypeName, "Type") * 
                  (lpeg.V("TypeArgs") + lpeg.Cc({})) / tltype.PSymbol;
   RetType = lpeg.Cp() * lpeg.V("NilableTuple") +
@@ -108,6 +109,9 @@ local G = lpeg.P { "TypedLua";
               lpeg.Cp() * tllexer.kw("typealias") * 
               lpeg.V("Id") * tllexer.symb("=") * lpeg.V("Type") /
               tlast.statInterface;
+  
+  ClassValueLookup = lpeg.Cp() * tllexer.kw("class") * 
+                     tllexer.symb('(') * lpeg.V("TypeId") * tllexer.symb(')') / tlast.classValueLookup; 
   
   ClassConcreteFieldDef = lpeg.Cp() *
                           (tllexer.kw("const") * lpeg.Cc(true) + lpeg.Cc(false)) * 
@@ -261,6 +265,7 @@ local G = lpeg.P { "TypedLua";
                 (lpeg.Cp() * (lpeg.V("TypeArgs") + lpeg.Cc({})) * 
                               lpeg.V("FuncArgs")) / tlast.call)^0, tlast.exprSuffixed);
   PrimaryExp = lpeg.V("Var") +
+               lpeg.V("ClassValueLookup") +
                lpeg.Cp() * tllexer.symb("(") * lpeg.V("Expr") * tllexer.symb(")") / tlast.exprParen;
   SuperInvoke = lpeg.Cp() * tllexer.kw("super") * tllexer.symb(":") * 
                 (lpeg.Cp() * tllexer.token(tllexer.Name, "Name") / tlast.exprString) * 
@@ -296,7 +301,7 @@ local G = lpeg.P { "TypedLua";
   TypedVarArg = lpeg.Cp() * tllexer.symb("...") * (tllexer.symb(":") * lpeg.V("Type"))^-1 /
                 tlast.identDots;
   FuncBody = lpeg.Cp() * (lpeg.V("InvTypeParams") + lpeg.Cc(false)) * tllexer.symb("(") * lpeg.V("ParList") * tllexer.symb(")") *
-             (tllexer.symb(":") * lpeg.V("RetType"))^-1 *
+             (tllexer.symb(":") * lpeg.V("RetType") + lpeg.Cc(false)) *
              lpeg.V("Block") * tllexer.kw("end") / tlast.exprFunction;
   FuncStat = lpeg.Cp() * (tllexer.kw("const") * lpeg.Cc(true) + lpeg.Cc(false)) *
              tllexer.kw("function") * lpeg.V("FuncName") * lpeg.V("FuncBody") /
@@ -350,13 +355,8 @@ local function traverse_function (env, exp)
   tlst.begin_scope(env)
   local status, msg = traverse_parlist(env, exp[1])
   if not status then return status, msg end
-  if not exp[3] then
-    status, msg = traverse_block(env, exp[2])
-    if not status then return status, msg end
-  else
-    status, msg = traverse_block(env, exp[3])
-    if not status then return status, msg end
-  end
+  status, msg = traverse_block(env, exp[3])
+  if not status then return status, msg end
   tlst.end_scope(env)
   tlst.end_function(env)
   return true
@@ -618,7 +618,8 @@ function traverse_exp (env, exp)
      tag == "True" or
      tag == "False" or
      tag == "Number" or
-     tag == "String" then
+     tag == "String" or
+     tag == "ClassValueLookup" then
     return true
   elseif tag == "Dots" then
     return traverse_vararg(env, exp)
@@ -715,8 +716,6 @@ local function traverse_class (env, stm)
       if not status then return status,msg end          
     end
   end
-  
-  tlst.set_local(env,stm[1]) --add class name to environment
   
   return true 
 end
