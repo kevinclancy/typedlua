@@ -718,23 +718,32 @@ end
 
 --type substitution
 
--- substitute : (type,var,type)
+
+-- clone : (type) -> (type)
+--return a type which is structurally identical to t, but totally
+--disjoint from it on the heap
+function tltype.clone(t)
+  -- there should be no variables named '!'
+  return tltype.substitute(t,"!",tltype.Void())
+end
+
+-- substitute : (type,var,type) -> (type)
 -- replace x with s in t
 function tltype.substitute (t,x,s)
   if t.tag == "TLiteral" then
-    return t
+    return tltype.PLiteral(t.pos,t[1])
   elseif t.tag == "TBase" then
-    return t
+    return tltype.PBase(t.pos,t[1])
   elseif t.tag == "TNil" then
-    return t
+    return tltype.Nil(t.pos)
   elseif t.tag == "TValue" then
-    return t
+    return tltype.PValue(t.pos)
   elseif t.tag == "TAny" then
-    return t
+    return tltype.PAny(t.pos)
   elseif t.tag == "TSelf" then
-    return t
+    return tltype.PSelf(t.pos)
   elseif t.tag == "TVoid" then
-    return t
+    return tltype.PVoid(t.pos)
   elseif t.tag == "TUnion" then
     local res = {}
     for i,_ in ipairs(t) do
@@ -758,9 +767,19 @@ function tltype.substitute (t,x,s)
   elseif t.tag == "TFunction" then
     local tin_res = tltype.substitute(t[1],x,s)
     local tout_res = tltype.substitute(t[2],x,s)
+    
+    --if type parameters mask substitution variable, return an
+    --exact clone of t
+    for i,tparam in pairs(t[3]) do
+      local name = tparam[1]
+      if name == x then
+        return tltype.clone(t)
+      end
+    end
+    
     local tparams_res = {}
     for i,tparam in pairs(t[3]) do
-      table.insert(tparams_res, tparam)
+      table.insert(tparams_res, tltype.substitute(tparam, x, s))
     end
     return tltype.PFunction(t.pos, tparams_res, tin_res, tout_res)
   elseif t.tag == "TField" then
@@ -777,20 +796,21 @@ function tltype.substitute (t,x,s)
     if name == x then
       assert(#args == 0)
       return s
-    elseif #args > 0 then
+    else
       local new_args = {}
       for i,arg in ipairs(args) do
         new_args[i] = tltype.substitute(arg,x,s)
       end
       return tltype.PSymbol(t.pos, name, new_args)
-    else
-      return t
     end
   else
     assert("type substitution error: expected type, got " .. t.tag) 
   end
 end
 
+function tltype.Clone(t)
+  return tltype.substitute(t,"!", tltype.Void())
+end
 
 function tltype.unfold (env, t)
   if t.tag == "TSymbol" then

@@ -218,8 +218,12 @@ function tlast.statInterface (pos, name, t)
 end
 
 --statClass : (number, boolean, string, {tpar}|"NoParams", class|"NoParent", {Type}|"NoArgs", class_element_array, ident) -> (stat)
-function tlast.statClass(pos,isAbstract,name,tpars,tsuper,elems)
+function tlast.statClass (pos, isAbstract, name, tpars, tsuper, elems)
   return { tag = "Class", pos = pos, [1] = name, [2] = isAbstract, [3] = elems, [4] = tsuper, [5] = tpars } 
+end
+
+function tlast.statTypedefBundle (typedefs)
+  return { tag = "TypedefBundle", [1] = typedefs }
 end
 
 -- statUserdata : (number, string, type) -> (stat)

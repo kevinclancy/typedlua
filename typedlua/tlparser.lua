@@ -104,11 +104,6 @@ local G = lpeg.P { "TypedLua";
           (lpeg.V("Type") + lpeg.V("MethodType")) / tltype.fieldlist;
   IdDecList = (lpeg.V("IdDec")^1 + lpeg.Cc(nil)) / tltype.Table;
   TypeDec = tllexer.token(tllexer.Name, "Name") * lpeg.V("IdDecList") * tllexer.kw("end");
-  Interface = lpeg.Cp() * tllexer.kw("interface") * lpeg.V("TypeDec") /
-              tlast.statInterface +
-              lpeg.Cp() * tllexer.kw("typealias") * 
-              lpeg.V("Id") * tllexer.symb("=") * lpeg.V("Type") /
-              tlast.statInterface;
   
   ClassValueLookup = lpeg.Cp() * tllexer.kw("class") * 
                      tllexer.symb('(') * lpeg.V("TypeId") * tllexer.symb(')') / tlast.classValueLookup; 
@@ -165,7 +160,12 @@ local G = lpeg.P { "TypedLua";
   InvTypeParams = tllexer.symb("<") * 
                   lpeg.Ct( lpeg.V("InvTypeParam") * (tllexer.symb(",") * lpeg.V("TypeParam"))^0 ) * 
                   tllexer.symb(">");
-                  
+  
+  TypeDefinition = lpeg.V("ClassDecStat") + lpeg.V("Interface");
+  
+  TypeDefBundle = lpeg.Ct(lpeg.V("TypeDefinition") * 
+                         (tllexer.kw("and") * lpeg.V("TypeDefinition"))^0) / tlast.statTypedefBundle;
+              
   ClassDecStat = lpeg.Cp() * 
                  (tllexer.kw("abstract") * lpeg.Cc(true) + lpeg.Cc(false)) * 
                  tllexer.kw("class") * lpeg.V("Id") * (lpeg.V("TypeParams") + lpeg.Cc({})) * 
@@ -173,7 +173,13 @@ local G = lpeg.P { "TypedLua";
                   lpeg.V("Type") + 
                   lpeg.Cc("NoParent")) *
                  lpeg.Ct(lpeg.V("ClassElement")^0) * tllexer.kw("end") / tlast.statClass;
-             
+  
+  Interface = lpeg.Cp() * tllexer.kw("typealias") * lpeg.V("TypeDec") /
+              tlast.statInterface +
+              lpeg.Cp() * tllexer.kw("typealias") * 
+              lpeg.V("Id") * tllexer.symb("=") * lpeg.V("Type") /
+              tlast.statInterface;
+              
   -- parser
   Chunk = lpeg.V("Block");
   StatList = (tllexer.symb(";") + lpeg.V("Stat"))^0;
@@ -311,7 +317,7 @@ local G = lpeg.P { "TypedLua";
   LocalAssign = lpeg.Cp() * lpeg.V("NameList") *
                 ((tllexer.symb("=") * lpeg.V("ExpList")) + lpeg.Ct(lpeg.Cc())) / tlast.statLocal;
   LocalStat = tllexer.kw("local") *
-              (lpeg.V("LocalTypeDec") + lpeg.V("LocalClassDec") + lpeg.V("LocalFunc") + lpeg.V("LocalAssign"));
+              (lpeg.V("LocalFunc") + lpeg.V("LocalAssign"));
   LabelStat = lpeg.Cp() * tllexer.symb("::") * tllexer.token(tllexer.Name, "Name") * tllexer.symb("::") / tlast.statLabel;
   BreakStat = lpeg.Cp() * tllexer.kw("break") / tlast.statBreak;
   GoToStat = lpeg.Cp() * tllexer.kw("goto") * tllexer.token(tllexer.Name, "Name") / tlast.statGoto;
@@ -328,10 +334,10 @@ local G = lpeg.P { "TypedLua";
              (lpeg.V("SuffixedExp") * (lpeg.Cc(tlast.statApply))),
              function (s, i, s1, f, ...) return f(s1, ...) end);
   Assignment = ((tllexer.symb(",") * lpeg.V("LVar"))^1)^-1 * tllexer.symb("=") * lpeg.V("ExpList");
-  Stat = lpeg.V("ClassDecStat") + lpeg.V("IfStat") + lpeg.V("WhileStat") + lpeg.V("DoStat") + lpeg.V("ForStat") +
+  Stat = lpeg.V("IfStat") + lpeg.V("WhileStat") + lpeg.V("DoStat") + lpeg.V("ForStat") +
          lpeg.V("RepeatStat") + lpeg.V("FuncStat") + lpeg.V("LocalStat") +
          lpeg.V("LabelStat") + lpeg.V("BreakStat") + lpeg.V("GoToStat") +
-         lpeg.V("TypeDecStat") + lpeg.V("ExprStat");
+         lpeg.V("TypeDefBundle") + lpeg.V("ExprStat");
 }
 
 local traverse_stm, traverse_exp, traverse_var
@@ -720,6 +726,19 @@ local function traverse_class (env, stm)
   return true 
 end
 
+local function traverse_typedefs(env, stat)
+  for _,def in ipairs(stat[1]) do
+    local tag = def.tag
+    if tag == "Interface" then
+      return traverse_interface(env,def)
+    elseif tag == "Class" then
+      return traverse_class(env,def)
+    else
+      assert(false)
+    end
+  end
+end
+
 function traverse_stm (env, stm)
   local tag = stm.tag
   if tag == "Do" then
@@ -754,10 +773,8 @@ function traverse_stm (env, stm)
     return traverse_call(env, stm)
   elseif tag == "Invoke" then
     return traverse_invoke(env, stm)
-  elseif tag == "Interface" then
-    return traverse_interface(env, stm)
-  elseif tag == "Class" then
-    return traverse_class(env,stm)
+  elseif tag == "TypedefBundle" then
+    return traverse_typedefs(env,stm)
   else
     error("trying to traverse a statement, but got a " .. tag)
   end

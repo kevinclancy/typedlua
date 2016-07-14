@@ -362,12 +362,23 @@ function code_stm (stm, fmt)
     return indent(code_call(stm, fmt), fmt)
   elseif tag == "Invoke" then
     return indent(code_invoke(stm, fmt), fmt)
-  elseif tag == "Interface" then
-    return ""
+  elseif tag == "TypedefBundle" then
+    local ret = ""
+    for _,def in ipairs(stm[1]) do
+      if def.tag == "Class" then
+        ret = ret .. " local " .. def[1][1] .. "; "
+      end
+    end
+    for _,def in ipairs(stm[1]) do
+      if def.tag == "Class" then
+        ret = ret .. indent(code_class(def,fmt),fmt)
+      end
+    end  
+    return ret
   elseif tag == "Class" then
     return indent(code_class(stm,fmt), fmt)
   else
-    error("tyring to generate code for a statement, but got " .. tag)
+    error("trying to generate code for a statement, but got " .. tag)
   end
 end
 
