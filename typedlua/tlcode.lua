@@ -366,11 +366,6 @@ function code_stm (stm, fmt)
     local ret = ""
     for _,def in ipairs(stm[1]) do
       if def.tag == "Class" then
-        ret = ret .. " local " .. def[1][1] .. "; "
-      end
-    end
-    for _,def in ipairs(stm[1]) do
-      if def.tag == "Class" then
         ret = ret .. indent(code_class(def,fmt),fmt)
       end
     end  
