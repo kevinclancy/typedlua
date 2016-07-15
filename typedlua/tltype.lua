@@ -63,6 +63,9 @@ end
 
 -- isLiteral : (type) -> (boolean)
 function tltype.isLiteral (t)
+  if not t then
+    assert(false)
+  end
   return t.tag == "TLiteral"
 end
 
@@ -718,18 +721,9 @@ end
 
 --type substitution
 
-
--- clone : (type) -> (type)
---return a type which is structurally identical to t, but totally
---disjoint from it on the heap
-function tltype.clone(t)
-  -- there should be no variables named '!'
-  return tltype.substitute(t,"!",tltype.Void())
-end
-
--- substitute : (type,var,type) -> (type)
--- replace x with s in t
-function tltype.substitute (t,x,s)
+-- substitute : (type,{var},{type}) -> (type)
+-- simultaneously substite the elements of x for the elements of s
+function tltype.substitutes (t,x,s)
   if t.tag == "TLiteral" then
     return tltype.PLiteral(t.pos,t[1])
   elseif t.tag == "TBase" then
@@ -747,26 +741,26 @@ function tltype.substitute (t,x,s)
   elseif t.tag == "TUnion" then
     local res = {}
     for i,_ in ipairs(t) do
-      res[i] = tltype.substitute(t[i],x,s)
+      res[i] = tltype.substitutes(t[i],x,s)
     end
     return tltype.PUnion(t.pos, table.unpack(res))
   elseif t.tag == "TVararg" then
-    return tltype.PVararg(t.pos, tltype.substitute(t[1],x,s))
+    return tltype.PVararg(t.pos, tltype.substitutes(t[1],x,s))
   elseif t.tag == "TTuple" then
     local res = { tag = "TTuple", pos = t.pos }
     for i, tuple_element in ipairs(t) do
-      res[i] = tltype.substitute(t[i],x,s)
+      res[i] = tltype.substitutes(t[i],x,s)
     end
     return res
   elseif t.tag == "TUnionList" then
     local res = {}
     for i,union_element in ipairs(t) do
-      res[i] = tltype.substitute(t[i],x,s)
+      res[i] = tltype.substitutes(t[i],x,s)
     end
     return tltype.PUnionList(t.pos, res)  
   elseif t.tag == "TFunction" then
-    local tin_res = tltype.substitute(t[1],x,s)
-    local tout_res = tltype.substitute(t[2],x,s)
+    local tin_res = tltype.substitutes(t[1],x,s)
+    local tout_res = tltype.substitutes(t[2],x,s)
     
     --if type parameters mask substitution variable, return an
     --exact clone of t
@@ -779,40 +773,53 @@ function tltype.substitute (t,x,s)
     
     local tparams_res = {}
     for i,tparam in pairs(t[3]) do
-      table.insert(tparams_res, tltype.substitute(tparam, x, s))
+      table.insert(tparams_res, tltype.substitutes(tparam, x, s))
     end
     return tltype.PFunction(t.pos, tparams_res, tin_res, tout_res)
   elseif t.tag == "TField" then
-    return { tag = "TField", const = t.const, [1] = tltype.substitute(t[1],x,s), [2] = tltype.substitute(t[2],x,s) }
+    return { tag = "TField", const = t.const, [1] = tltype.substitutes(t[1],x,s), [2] = tltype.substitutes(t[2],x,s) }
   elseif t.tag == "TTable" then
     local res = {}
     for i,field in ipairs(t) do
-      res[i] = tltype.substitute(t[i],x,s)
+      res[i] = tltype.substitutes(t[i],x,s)
     end
     return tltype.PTable(t.pos, table.unpack(res))      
   elseif t.tag == "TSymbol" then
     local name,args = t[1],t[2]
-    
-    if name == x then
-      assert(#args == 0)
-      return s
-    else
-      local new_args = {}
-      for i,arg in ipairs(args) do
-        new_args[i] = tltype.substitute(arg,x,s)
+    for i=1,#x do
+      if name == x[i] then
+        assert(#args == 0)
+        return s[i]
       end
-      return tltype.PSymbol(t.pos, name, new_args)
     end
+    local new_args = {}
+    for i,arg in ipairs(args) do
+      new_args[i] = tltype.substitutes(arg,x,s)
+    end
+    return tltype.PSymbol(t.pos, name, new_args)
   else
     assert("type substitution error: expected type, got " .. t.tag) 
   end
 end
 
-function tltype.Clone(t)
-  return tltype.substitute(t,"!", tltype.Void())
+-- substitute : (type, string, type) -> (type)
+function tltype.substitute (t,x,s)
+  return tltype.substitutes(t, {x}, {s})
+end
+
+
+-- clone : (type) -> (type)
+--return a type which is structurally identical to t, but totally
+--disjoint from it on the heap
+function tltype.clone(t)
+  -- there should be no variables named '!'
+  return tltype.substitute(t,"!",tltype.Void())
 end
 
 function tltype.unfold (env, t)
+  if t == nil then
+    assert(false)
+  end
   if t.tag == "TSymbol" then
     local ti = tlst.get_typeinfo(env,t[1])
     
@@ -830,11 +837,9 @@ function tltype.unfold (env, t)
       local params = ti[2]
       local args = t[2]
       if #params == #args then
-        local res = ti[1]
-        for i=1,#args do
-          res = tltype.substitute(res,params[i][1],args[i])
-        end
-        return res
+        local par_names = {}
+        for i,par in ipairs(params) do par_names[i] = par[1] end
+        return tltype.substitutes(ti[1], par_names, args)
       elseif (not args) and #params == 0 then
         return ti[1]
       else
@@ -1121,13 +1126,16 @@ local function subtype_symbol (assume, env, t1, t2, relation)
       
       assert(#inst == #pars2)
       
+      local par_names1 = {}
+      for i,par in ipairs(pars1) do
+        par_names1[i] = par[1]
+      end
+      
       local new_inst = {}
       for i,t in ipairs(inst) do
         new_inst[i] = inst[i]
         local args1 = t1[2]
-        for j,arg in ipairs(args1) do
-          new_inst[i] = tltype.substitute(new_inst[i],pars1[j][1],arg)
-        end
+        new_inst[i] = tltype.substitutes(new_inst[i],par_names1,args1)
       end
         
       local args2 = t2[2]
@@ -1449,7 +1457,7 @@ local function type2str (t, n)
       ret = ret .. '<'
       ret = ret .. tltype.tostring(targs[1])
       for i=2,#targs do
-        ret = ret .. ", " .. tltype.tostring(targ[i])
+        ret = ret .. ", " .. tltype.tostring(targs[i])
       end
       ret = ret .. '>'
     end

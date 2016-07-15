@@ -201,13 +201,6 @@ local function kindcheck_arity (env, t)
               kindcheck_arity(env,args[i])
               env.variance = orig_variance
             end
-            
-            local bound = tpar[3]
-            if not (bound == "NoBound" or tltype.subtype(env, args[i], bound)) then
-              local msg = string.format("%s is not a subtype of %s", tltype.tostring(args[i]), tltype.tostring(bound))
-              typeerror(env, "kind", msg, args[i].pos)
-              args[i] = Any
-            end
           end
           return true
         end
@@ -362,6 +355,11 @@ local function kindcheck (env, t)
           typeerror(env, "kind", msg, t.pos)
           return false
         else
+          local names = {}
+          for i=1,#tpars do
+            names[#names + 1] = tpars[i][1]
+          end
+              
           for i,tpar in ipairs(tpars) do
             local variance = tpar[2]
             if variance == "Covariant" then
@@ -377,11 +375,14 @@ local function kindcheck (env, t)
               env.variance = orig_variance
             end
             
-            local bound = tpar[3]
-            if not (bound == "NoBound" or tltype.subtype(env, args[i], bound)) then
-              local msg = string.format("%s is not a subtype of %s", tltype.tostring(args[i]), tltype.tostring(bound))
-              typeerror(env, "kind", msg, args[i].pos)
-              args[i] = Any
+            local bound = tpar[3] 
+            if bound ~= "NoBound" then
+              bound = tltype.substitutes(bound, names, args)
+              if not tltype.consistent_subtype(env, args[i], bound) then
+                local msg = string.format("%s is not a subtype of %s", tltype.tostring(args[i]), tltype.tostring(bound))
+                typeerror(env, "kind", msg, args[i].pos)
+                args[i] = Any
+              end
             end
           end
           return true
@@ -426,10 +427,6 @@ local function check_self (env, torig, t, pos)
   if tltype.isSelf(t) then
     typeerror(env, "self", msg, pos)
     return tltype.Any()
-  elseif tltype.isRecursive(t) then
-    local r = tltype.Recursive(t[1], check_self(env, torig, t[2], pos))
-    r.name = t.name
-    return r
   elseif tltype.isUnion(t) or
          tltype.isUnionlist(t) or
          tltype.isTuple(t) then
@@ -463,11 +460,7 @@ end
 
 function check_self_field(env, torig, t, pos)
   local msg = string.format("self type cannot appear in declaration of type '%s', replacing with 'any'", tltype.tostring(torig))
-  if tltype.isRecursive(t) then
-    local r = tltype.Recursive(t[1], check_self_field(env, torig, t[2], pos))
-    r.name = t.name
-    return r
-  elseif tltype.isUnion(t) or
+  if tltype.isUnion(t) or
          tltype.isUnionlist(t) or
          tltype.isTuple(t) then
    local r = { tag = t.tag, name = t.name }
@@ -1259,13 +1252,13 @@ local function check_call (env, exp)
         set_type(env, exp, Any)
       else
         local substituted_bounds = {}
+        
+        local param_names = {}
+        for i,par in ipairs(tparams) do param_names[i] = par[1] end
+        
         -- substitute type args into bounds
         for i, tparam in ipairs(tparams) do
-          local name,variance,tbound = tparam[1], tparam[2], tparam[3]
-          for j, targ in ipairs(targs) do
-            local jname = tparams[j][1]
-            tbound = tltype.substitute(tbound, jname, targ)
-          end
+          local tbound = tltype.substitutes(tparam[3], param_names, targs)
           table.insert(substituted_bounds, tbound)
         end
            
@@ -1279,11 +1272,12 @@ local function check_call (env, exp)
             typeerror(env, "call", msg, targs[i].pos)
             tinput = tltype.substitute(tinput, name, Any)
             tret = tltype.substitute(tret, name, Any)
-          else
-            tinput = tltype.substitute(tinput, name, targs[i])
-            tret = tltype.substitute(tret, name, targs[i])
           end
         end
+        
+        --substitute type arguments
+        tinput = tltype.substitutes(tinput, param_names, targs)
+        tret = tltype.substitutes(tret, param_names, targs)
       end
       check_arguments(env, var2name(exp1), tinput, inferred_type, exp.pos)
       set_type(env, exp, tret)      
@@ -1438,7 +1432,7 @@ local function check_local_var (env, id, inferred_type, close_local)
   else
     check_self(env, local_type, local_type, pos)
     local msg = "attempt to assign '%s' to '%s'"
-    local local_type = tltype.unfold(local_type)
+    local local_type = tltype.unfold(env, local_type)
     msg = string.format(msg, tltype.tostring(inferred_type), tltype.tostring(local_type))
     if tltype.subtype(env, inferred_type, local_type) then
     elseif tltype.consistent_subtype(env, inferred_type, local_type) then
@@ -2567,7 +2561,7 @@ local function check_typedefs (env, stm)
       for _,tpar in ipairs(tpars) do
         local name, variance, tbound = tpar[1], tpar[2], tpar[3]
         tbound = (tbound == "NoBound") and Value or tbound
-        local ti = tlst.typeinfo_Variable(tltype.Clone(tbound), variance)
+        local ti = tlst.typeinfo_Variable(tltype.clone(tbound), variance)
          tlst.set_typeinfo(env, name, ti, true)
       end
      
