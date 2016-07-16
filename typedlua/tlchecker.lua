@@ -2777,17 +2777,18 @@ local function check_typedefs (env, stm)
   for _,def in ipairs(defs) do
     if def.tag == "Class" then
       local name, tpars, interfaces = def[1], def[5], def[6]
+      local typename = current_modname(env) .. name[1]
       do tlst.begin_scope(env) --class type parameters
       set_tpars(env, tpars)
       local t_instance,_,_,_ = get_class_types(env, def)
       for i,t in ipairs(interfaces) do
         assert(t.tag == "TSymbol")
         if tltype.consistent_subtype(env, t_instance, tltype.unfold(env, t)) then
-          tlst.add_nominal_edge(env, name, t[1], t[2], tltype.substitutes, env.scope > 1)
+          tlst.add_nominal_edge(env, typename, t[1], t[2], tltype.substitutes, env.scope > 1)
         else
           local par_tsymbols = {}
           for i,v in ipairs(tpars) do par_tsymbols[i] = tltype.Symbol(v[1]) end
-          local def_tsymbol = tltype.Symbol(name[1], par_tsymbols)
+          local def_tsymbol = tltype.Symbol(current_modname(env) .. name[1], par_tsymbols)
           local msg = "%s is not a subtype of %s"
           msg = string.format(msg, tltype.tostring(def_tsymbol), tltype.tostring(t))
           typeerror(env, "inheritance", msg, t.pos)
