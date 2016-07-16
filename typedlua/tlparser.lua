@@ -172,6 +172,10 @@ local G = lpeg.P { "TypedLua";
                  (tllexer.kw("extends") * 
                   lpeg.V("Type") + 
                   lpeg.Cc("NoParent")) *
+                  lpeg.Ct(
+                    (tllexer.kw("implements") * 
+                     lpeg.V("Type") * (tllexer.symb(",") * lpeg.V("Type"))^0)^-1
+                  ) *
                  lpeg.Ct(lpeg.V("ClassElement")^0) * tllexer.kw("end") / tlast.statClass;
   
   Interface = lpeg.Cp() * tllexer.kw("typealias") * lpeg.V("TypeDec") /

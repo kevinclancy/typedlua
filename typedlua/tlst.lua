@@ -138,26 +138,20 @@ function tlst.add_nominal_edge (env, source, dest, instantiation, subst, is_loca
   src_dest_edges[#src_dest_edges + 1] = { path = {ti_source}, inst = instantiation }
   
   -- add transitive edges
-  for ti_parent,edge in ipairs(dest_edges) do
+  for ti_parent, edge in ipairs(dest_edges) do
     local edges_to_parent = src_edges[ti_dest]
     
     --checking for cycles should be done externally
     assert(ti_parent ~= ti_source)
     
+    local dest_param_names = {}
+    for i,v in ipairs(dest_params) do dest_param_names[i] = v[1] end
     local new_instantiation = {}
-    for i=1,#dest_params do 
-      local name = dest_params[i][1]
-      local tinst = instantiation[i]
-      
-      local new_inst = {}
-      for j,t in ipairs(edge.inst) do
-        new_inst[j] = subst(t,name,tinst)
-      end
-      
-      new_instantiation[i] = new_inst
+    for j,t in ipairs(edge.inst) do
+      new_instantiation[j] = subst(t, dest_param_names, instantiation)
     end
     
-    local new_path = {tisource}
+    local new_path = { ti_source }
     for j,ti in ipairs(edge.path) do
       new_path[j+1] = ti
     end
