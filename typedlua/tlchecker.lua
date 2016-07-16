@@ -2530,14 +2530,20 @@ local function check_typedefs (env, stm)
   local bundle_typenames = {}
   --collect typenames and check for duplicates
   for _,def in ipairs(defs) do
-    local name = def[1]
-    if tlst.get_typeinfo(env, name[1]) or bundle_typenames[ name[1] ] then
+    local name 
+    if def.tag == "Class" then
+      name = def[1][1]
+    elseif def.tag == "Interface" then
+      name = def[1]
+    end
+    name = current_modname(env) .. name
+    if tlst.get_typeinfo(env, name) or bundle_typenames[name] then
       local msg = "attempt to redeclare type '%s'"
       msg = string.format(msg, name)
       typeerror(env, "alias", msg, def.pos)
       return false
     else
-      bundle_typenames[ name[1] ] = true
+      bundle_typenames[name] = true
     end
   end
   
@@ -2611,10 +2617,10 @@ local function check_typedefs (env, stm)
   for _,def in ipairs(defs) do
     if def.tag == "Interface" then
       local name = def[1]
-      local typename = current_modname(env) .. name[1]
+      local typename = current_modname(env) .. name
       local ti = tlst.typeinfo_Structural(Any)
       tlst.set_typeinfo(env, typename, ti, env.scope > 1)
-      tlst.set_typealias(env, name[1], typename)
+      tlst.set_typealias(env, name, typename)
     elseif def.tag == "Class" then
       local name, tparams = def[1], def[5]
       local ti = tlst.typeinfo_Nominal(name, Any, tparams, true)
@@ -2658,8 +2664,7 @@ local function check_typedefs (env, stm)
   for _,def in ipairs(defs) do
     if def.tag == "Interface" then
       local name,t = def[1],def[2]
-      local typealias = name[1]
-      local typename = current_modname(env) .. typealias
+      local typename = current_modname(env) .. name
       local ti = tlst.typeinfo_Structural(t)
       tlst.set_typeinfo(env, typename, ti, env.scope > 1)
     elseif def.tag == "Class" then
