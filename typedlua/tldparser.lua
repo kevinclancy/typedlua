@@ -113,7 +113,7 @@ local function traverse (ast, errorinfo, strict)
     local tag = v.tag
     if tag == "Id" then
       table.insert(t, tltype.Field(v.const, tltype.Literal(v[1]), v[2]))
-    elseif tag == "Interface" then
+    elseif tag == "Typedef" then
       local name, t = v[1], v[2]
       local status, msg = tltype.checkTypeDec(name, t)
       if not status then

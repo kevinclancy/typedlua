@@ -212,9 +212,9 @@ function tlast.statApply (expr)
 end
 
 -- statInterface : (number, string, type) -> (stat)
-function tlast.statInterface (pos, name, t)
-  t.interface = name
-  return { tag = "Interface", pos = pos, [1] = name, [2] = t }
+function tlast.statTypedef (pos, name, t)
+  t.typedef = name
+  return { tag = "Typedef", pos = pos, [1] = name, [2] = t }
 end
 
 --statClass : (number, boolean, string, {tpar}|"NoParams", class|"NoParent", {Type}|"NoArgs", class_element_array, ident) -> (stat)
@@ -223,26 +223,18 @@ function tlast.statClass (pos, isAbstract, name, tpars, tsuper, interfaces, elem
            [3] = elems, [4] = tsuper, [5] = tpars, [6] = interfaces } 
 end
 
-function tlast.statTypedefBundle (typedefs)
-  return { tag = "TypedefBundle", [1] = typedefs }
+function tlast.statInterface (pos, name, tpars, elems)
+  return { tag = "Interface", pos = pos, [1] = name, [2] = tpars, [3] = elems }
+end
+
+function tlast.statTypeBundle (typedefs)
+  return { tag = "TypeBundle", [1] = typedefs }
 end
 
 -- statUserdata : (number, string, type) -> (stat)
 function tlast.statUserdata (pos, name, t)
   t.userdata = name
   return { tag = "Userdata", pos = pos, [1] = name, [2] = t }
-end
-
--- statLocalTypeDec : (stat) -> (stat)
-function tlast.statLocalTypeDec (stat)
-  stat.is_local = true
-  return stat
-end
-
--- statLocalTypeDec : (stat) -> (stat)
-function tlast.statLocalClassDec (stat)
-  stat.is_local = true
-  return stat
 end
 
 --classElementConcreteField : (pos,boolean,name,ty) -> (classElement)
@@ -885,7 +877,7 @@ function stm2str (stm)
       end
     end
     str = str .. " }"
-  elseif tag == "Interface" then
+  elseif tag == "Typedef" then
     str = str .. "{ "
     str = str .. stm[1] .. ", "
     str = str .. type2str(stm[2])

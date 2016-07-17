@@ -362,7 +362,7 @@ function code_stm (stm, fmt)
     return indent(code_call(stm, fmt), fmt)
   elseif tag == "Invoke" then
     return indent(code_invoke(stm, fmt), fmt)
-  elseif tag == "TypedefBundle" then
+  elseif tag == "TypeBundle" then
     local ret = ""
     for _,def in ipairs(stm[1]) do
       if def.tag == "Class" then

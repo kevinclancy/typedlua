@@ -1434,7 +1434,6 @@ local function type2str (t, n)
   elseif tltype.isFunction(t) then
     return type2str(t[1], n-1) .. " -> " .. type2str(t[2], n-1)
   elseif tltype.isTable(t) then
-    --if t.interface then return t.interface end
     local l = {}
     for k, v in ipairs(t) do
       if not v.missing then
