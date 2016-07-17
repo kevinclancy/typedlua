@@ -872,9 +872,9 @@ local function check_or (env, exp)
   if tltype.isNil(t1) or tltype.isFalse(t1) then
     set_type(env, exp, t2)
   elseif tltype.isUnion(t1, Nil) then
-    set_type(env, exp, tltype.Union(tltype.filterUnion(t1, Nil), t2))
+    set_type(env, exp, tltype.Union(tltype.filterUnion(env, t1, Nil), t2))
   elseif tltype.isUnion(t1, False) then
-    set_type(env, exp, tltype.Union(tltype.filterUnion(t1, False), t2))
+    set_type(env, exp, tltype.Union(tltype.filterUnion(env, t1, False), t2))
   else
     set_type(env, exp, tltype.Union(t1, t2))
   end
@@ -1686,7 +1686,7 @@ local function check_if (env, stm)
         if not tltype.isUnionlist(get_type(var)) then
           if not var.bkp then var.bkp = get_type(var) end
           var.filter = Nil
-          set_type(env, var, tltype.filterUnion(get_type(var), Nil))
+          set_type(env, var, tltype.filterUnion(env, get_type(var), Nil))
           l[name] = var
         else
           local idx = get_index(get_type(var), Nil, var.i)
@@ -1701,9 +1701,9 @@ local function check_if (env, stm)
         if not tltype.isUnionlist(get_type(var)) then
           if not var.bkp then var.bkp = get_type(var) end
           if not var.filter then
-            var.filter = tltype.filterUnion(get_type(var), Nil)
+            var.filter = tltype.filterUnion(env, get_type(var), Nil)
           else
-            var.filter = tltype.filterUnion(var.filter, Nil)
+            var.filter = tltype.filterUnion(env, var.filter, Nil)
           end
           set_type(env, var, Nil)
           l[name] = var
@@ -1726,9 +1726,9 @@ local function check_if (env, stm)
         if not tltype.isUnionlist(get_type(var)) then
           if not var.bkp then var.bkp = get_type(var) end
           if not var.filter then
-            var.filter = tltype.filterUnion(get_type(var), t)
+            var.filter = tltype.filterUnion(env, get_type(var), t)
           else
-            var.filter = tltype.filterUnion(var.filter, t)
+            var.filter = tltype.filterUnion(env, var.filter, t)
           end
           set_type(env, var, t)
           l[name] = var
@@ -1752,7 +1752,7 @@ local function check_if (env, stm)
         if not tltype.isUnionlist(get_type(var)) then
           if not var.bkp then var.bkp = get_type(var) end
           var.filter = t
-          set_type(env, var, tltype.filterUnion(get_type(var), t))
+          set_type(env, var, tltype.filterUnion(env, get_type(var), t))
           l[name] = var
         else
           local idx = get_index(get_type(var), t, var.i)
@@ -1871,7 +1871,7 @@ local function check_forin (env, idlist, explist, block)
     typeerror(env, "forin", msg, idlist.pos)
   end
   for k, v in ipairs(idlist) do
-    local t = tltype.filterUnion(tuple(k), Nil)
+    local t = tltype.filterUnion(env, tuple(k), Nil)
     check_local_var(env, v, t, false)
   end
   local r, _, didgoto = check_block(env, block)
