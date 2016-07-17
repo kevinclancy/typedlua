@@ -226,7 +226,9 @@ local function kindcheck_arity (env, t)
           local msg = string.format("Only class/interface types should be supplied type arguments")
           typeerror(env, "kind", msg, t.pos)
           return false
-        end        
+        else
+          return true
+        end
       end
     end
   elseif t.tag == "TVararg" then
@@ -409,7 +411,9 @@ local function kindcheck (env, t)
           local msg = string.format("Only class/interface types should be supplied type arguments")
           typeerror(env, "kind", msg, t.pos)
           return false
-        end        
+        else
+          return true
+        end
       end
     end
   elseif t.tag == "TVararg" then
