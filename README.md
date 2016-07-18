@@ -1,54 +1,116 @@
-# Typed Lua
+# Typed Lua Class System
 
-Typed Lua is a typed superset of Lua that compiles to plain Lua.
-It provides optional type annotations, compile-time type checking, and
-class-based object oriented programming through the definition of classes,
-interfaces, and modules.
+Typed Lua Class System
+----------------------
 
-# Requirements for running the compiler
+The following code gives a sneak peak of the Lua Class system. While this code typechecks, the class system is still in the process of being debugged.
 
-1. Lua >= 5.1
-1. [LPeg](http://www.inf.puc-rio.br/%7Eroberto/lpeg/) >= 0.12
+~~~
 
-# Install
+interface IComparable<-T>
+  --returns true if self is less than or equal to argument
+  method leq : (T) => (boolean)
+end
 
-Typed Lua must be installed in a standard location; [LuaRocks](http://luarocks.org) will do this, and will also install the LPeg dependency automatically.
+--cartesian product of X and Y, using componentwise ordering
+class ComparablePair< X <: IComparable<X>, Y <: IComparable<Y> > implements IComparable< ComparablePair<X, Y> >
+  const x : X
+  const y : Y
+  
+  constructor new(x : X, y : Y)
+    self.x = x
+    self.y = y
+  end
 
-        $ [install luarocks]
-        $ luarocks install typedlua-scm-1.rockspec
+  method leq(a : ComparablePair<X, Y>) : boolean
+    return self.x:leq(a.x) and self.y:leq(a.y)
+  end
+end
 
-# Usage
+local function quicksort< X <: IComparable<X> >(x : {X})
+  local function swap(i : integer, j : integer)
+    local temp = x[i]
+    x[i] = x[j]
+    x[j] = temp
+  end
+  
+  local function partition(lo : integer, hi : integer) : integer
+    local pivot = x[hi]
+  
+    --index after the contiguous chunk of all values 
+    --encountered so far that are less than the pivot
+    local z = lo
+  
+    for i=2,#x do
+      local xi = x[i]
+      if xi then
+        if pivot then 
+          if xi:leq(pivot) then
+            swap(i,z)
+            z = z + 1
+          end
+        end
+      else
+        error("array should be non-nil over its range")
+      end
+    end 
+    
+    return z
+  end
+  
+  local function sort(lo : integer, hi : integer)
+    if hi - lo <= 1 then
+      return
+    end
+    
+    local p = partition(lo, hi)
+    sort(lo,p-1)
+    sort(p+1,hi)
+  end
 
-        $ tlc [options] [filename]
+  sort(1,#x)
+end
 
-# Compiler options
+class Factory implements IComparable<Factory>
+  cost : number
+  
+  constructor new(cost : number)
+    self.cost = cost
+  end
 
-        -d      dump the AST
-        -g      generate code without type checking
-        -h      print this help
-        -o name output to file 'name' (default is 'tlc.lua')
-        -p      print the AST
-        -v      print current version
+  method leq(other : Factory) : boolean
+    return self.cost <= other.cost 
+  end
+end
 
-# License
+class Office implements IComparable<Office>
+  cost : number
+  
+  constructor new(cost : number)
+    self.cost = cost
+  end
+  
+  method leq(other : Office) : boolean
+    return self.cost <= other.cost 
+  end  
+end
 
-Released under the MIT License (MIT)
+class CompanyBuildings extends ComparablePair<Factory,Office>
+  constructor new(f : Factory, o : Office)
+    super.new(f,o)
+  end
+end
 
-Copyright (c) 2013 Andre Murbach Maidl
+local f = class(Factory)
+local o = class(Office)
+local cb = class(CompanyBuildings)
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software is furnished to do so,
-subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+local factories : {Factory} = { f.new(1), f.new(2), f.new(3) }
+local offices : {Office} = { o.new(5), o.new(1), o.new(4) }
+local buildingsets : {CompanyBuildings} = { 
+  cb.new( f.new(1), o.new(5) ),
+  cb.new( f.new(2), o.new(1) ),
+  cb.new( f.new(3), o.new(4) )
+}
+``
+~~~
