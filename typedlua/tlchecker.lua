@@ -2715,7 +2715,9 @@ local function check_typedefs (env, stm)
       for i,t in ipairs(interfaces) do
         assert(t.tag == "TSymbol")
         if tltype.consistent_subtype(env, t_instance, tltype.unfold(env, t)) then
+          env.scope = env.scope - 1 --add nominal edge to the scope above this class's scope
           tlst.add_nominal_edge(env, typename, t[1], t[2], tltype.substitutes, env.scope > 1)
+          env.scope = env.scope + 1
         else
           local par_tsymbols = {}
           for i,v in ipairs(tpars) do par_tsymbols[i] = tltype.Symbol(v[1]) end
