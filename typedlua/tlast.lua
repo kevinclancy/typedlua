@@ -440,12 +440,12 @@ end
 
 -- apply
 
--- call : (number, expr, expr*) -> (apply)
+-- call : (number, expr, {type}, expr*) -> (apply)
 function tlast.call (pos, e1, targs, ...)
   local a = { tag = "Call", pos = pos, [1] = e1, [2] = targs}
   local list = { ... }
   for i = 1, #list do
-    a[i + 3] = list[i]
+    a[i + 2] = list[i]
   end
   return a
 end
