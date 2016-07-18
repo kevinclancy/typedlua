@@ -1445,6 +1445,13 @@ end
 
 local function check_local (env, idlist, explist)
   check_explist(env, explist)
+  for _,id in ipairs(idlist) do
+    if id[2] then
+      if not kindcheck(env, id[2]) then
+        id[2] = Any
+      end
+    end
+  end
   if unannotated_idlist(idlist) and
      #explist == 1 and
      tltype.isUnionlist(get_type(explist[1])) and
@@ -1997,13 +2004,12 @@ local function check_constructor_supercall (env, supercons_name, super_args, tsu
   else
     check_explist(env, super_args)
     local t = tltype.first(constructor)
-    
     local tpars = constructor[3]
+    local tpar_names = {}
     for i,tpar in ipairs(tpars) do
-      local name = tpar[1]
-      t = tltype.substitute(t, name, tsuper_inst[2][i])
+      tpar_names[i] = tpar[1]
     end
-    
+    t = tltype.substitutes(t, tpar_names, tsuper_inst[2])
     local inferred_type = arglist2type(super_args, env.strict)
     check_arguments(env, supercons_name[1], t[1], inferred_type, supercons_name.pos)
   end
