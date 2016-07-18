@@ -786,7 +786,7 @@ function tltype.substitutes (t,x,s)
     for i,field in ipairs(t) do
       res[i] = tltype.substitutes(t[i],x,s)
     end
-    return t
+    return res
   elseif t.tag == "TSymbol" then
     local name,args = t[1],t[2]
     for i=1,#x do
