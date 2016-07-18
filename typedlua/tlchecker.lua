@@ -587,7 +587,7 @@ local function check_tl (env, name, path, pos)
   return t1
 end
 
-local function check_parameters (env, parlist, selfimplicit, pos)
+local function check_parameters (env, parlist, selfimplicit, pos, check_kinds)
   local len = #parlist
   if len == 0 then
     if env.strict then
@@ -604,7 +604,7 @@ local function check_parameters (env, parlist, selfimplicit, pos)
       if not parlist[i][2] then parlist[i][2] = Any end
       l[i] = parlist[i][2]
       env.variance = env.variance * -1
-      if not kindcheck(env, l[i]) then
+      if check_kinds and (not kindcheck(env, l[i])) then
         parlist[i][2] = Any
         l[i] = Any
       end
@@ -1018,7 +1018,7 @@ local function check_function (env, exp)
       tpar[3] = Any
     end
   end  
-  local input_type = check_parameters(env, idlist, false, exp.pos)
+  local input_type = check_parameters(env, idlist, false, exp.pos, true)
   local t = tltype.Function(tpars, input_type, ret_type)
   local len = #idlist
   if len > 0 and idlist[len].tag == "Dots" then len = len - 1 end
@@ -1477,7 +1477,7 @@ local function check_localrec (env, id, exp)
     infer_return = true
   end
   tlst.begin_function(env)
-  local input_type = check_parameters(env, idlist, false, exp.pos)
+  local input_type = check_parameters(env, idlist, false, exp.pos, true)
   --TODO: add type parameters to local recursive definitions
   local t = tltype.Function({}, input_type, ret_type)
   id[2] = t
@@ -1962,7 +1962,7 @@ local function get_elem_types (env, elems)
         members[name] = { id = elem[1], ty = t, const = elem.const }
       elseif elem.tag == "ConcreteClassMethod" then
         local name,parlist,tret = elem[1][1],elem[2],elem[3]
-        local t1 = check_parameters(env, parlist, false, elem.pos)
+        local t1 = check_parameters(env, parlist, false, elem.pos, false)
         local t2 = tret
         methods[name] = { id = elem[1], ty = tltype.Function({}, t1, t2, true) }
       elseif elem.tag == "AbstractClassMethod" then
@@ -1970,7 +1970,7 @@ local function get_elem_types (env, elems)
         methods[name] = { id = elem[1], ty = t }
       elseif elem.tag == "ClassConstructor" then
         local name,parlist = elem[1][1],elem[2]
-        local t1 = check_parameters(env, parlist, false, elem.pos)
+        local t1 = check_parameters(env, parlist, false, elem.pos, false)
         constructors[name] = { id = elem[1], ty = tltype.Function({}, t1, tltype.Void(), false) }
       elseif elem.tag == "ClassFinalizer" then
         --nothing to do here
@@ -2021,7 +2021,7 @@ local function check_constructor (env, elem, instance_members, parent_members, t
   tlst.begin_function(env)
   tlst.set_in_constructor(env)
   tlst.begin_scope(env)  
-  local input_type = check_parameters(env, idlist, true, idlist.pos)
+  local input_type = check_parameters(env, idlist, true, idlist.pos, true)
   local output_type = tltype.Tuple({ Nil }, true)
   local t = tltype.Function({}, input_type, output_type)
   
@@ -2074,7 +2074,7 @@ end
 local function check_method (env, idlist, tret, body, tself, pos)
   tlst.begin_function(env)
   tlst.begin_scope(env)  
-  local input_type = check_parameters(env, idlist, true, idlist.pos)
+  local input_type = check_parameters(env, idlist, true, idlist.pos, true)
   local t = tltype.Function({}, input_type, tret)
   local len = #idlist
   if len > 0 and idlist[len].tag == "Dots" then len = len - 1 end
@@ -2264,7 +2264,7 @@ end
 
 local function get_interface_type (env, def)
   local name, elems = def[1], def[3]
-  local constructors, methods, members = get_elem_types(env, def)
+  local constructors, methods, members = get_elem_types(env, elems)
   assert(#constructors == 0 and #members == 0)
   local fields = {}
   for k,method in pairs(methods) do

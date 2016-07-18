@@ -439,7 +439,7 @@ function tltype.PTuple (pos, l, is_vararg)
 end
 
 -- inputTuple : (number, type?, boolean) -> (type)
-function tltype.inputTuple (pos, t, strict)
+function tltype.inputTuple (t, strict)
   if not strict then
     if not t then
       return tltype.PTuple(pos, { tltype.Value() }, true)
@@ -487,7 +487,7 @@ end
 
 -- PoutputTuple : (number, type?, boolean) -> (type)
 function tltype.PoutputTuple (pos, t, strict)
-  local ret = tltype.outputTuple(pos, t, strict)
+  local ret = tltype.outputTuple(t, strict)
   ret.pos = pos
   return ret
 end
@@ -780,10 +780,13 @@ function tltype.substitutes (t,x,s)
     return { tag = "TField", const = t.const, [1] = tltype.substitutes(t[1],x,s), [2] = tltype.substitutes(t[2],x,s) }
   elseif t.tag == "TTable" then
     local res = {}
+    for k,v in pairs(t) do
+      res[k] = v
+    end
     for i,field in ipairs(t) do
       res[i] = tltype.substitutes(t[i],x,s)
     end
-    return tltype.PTable(t.pos, table.unpack(res))      
+    return t
   elseif t.tag == "TSymbol" then
     local name,args = t[1],t[2]
     for i=1,#x do
