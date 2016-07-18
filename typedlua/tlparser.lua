@@ -55,7 +55,7 @@ local G = lpeg.P { "TypedLua";
   ValueType = lpeg.Cp() * tllexer.token("value", "Type") / tltype.PValue;
   AnyType = lpeg.Cp() * tllexer.token("any", "Type") / tltype.PAny;
   SelfType = lpeg.Cp() * tllexer.token("self", "Type") / tltype.PSelf;
-  FunctionType = lpeg.Cp() * (lpeg.V("InvTypeParams"))^0 * lpeg.V("InputType") * tllexer.symb("->") * lpeg.V("NilableTuple") /
+  FunctionType = lpeg.Cp() * (lpeg.V("InvTypeParams") + lpeg.Cc({})) * lpeg.V("InputType") * tllexer.symb("->") * lpeg.V("NilableTuple") /
                  tltype.PFunction;
   MethodType = lpeg.Cp() * lpeg.Cc({}) * lpeg.V("InputType") * tllexer.symb("=>") * lpeg.V("NilableTuple") *
                lpeg.Cc(true) / tltype.PFunction;
