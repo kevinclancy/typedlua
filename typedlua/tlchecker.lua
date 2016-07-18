@@ -71,6 +71,18 @@ local function expand_typealias(env, t)
   end
 end
 
+-- insert a group of type variables into the environment
+-- set_tpars : (env, {tpar}) -> ()
+local function set_tpars(env, tpars)
+  for _,tpar in ipairs(tpars) do
+    local name, variance, tbound = tpar[1], tpar[2], tpar[3]
+    tbound = (tbound == "NoBound") and Value or tbound
+    local ti = tlst.typeinfo_Variable(tbound, variance)
+    tlst.set_typeinfo(env, name, ti, true)
+    tlst.set_typealias(env, name, name)
+  end  
+end
+
 --kindchecks for proper arity, and also that all symbols are defined
 --does *not* check subtyping restrictions on type operator arguments
 local function kindcheck_arity (env, t)
@@ -1476,7 +1488,7 @@ local function check_local (env, idlist, explist)
 end
 
 local function check_localrec (env, id, exp)
-  local idlist, ret_type, block = exp[1], exp[2], exp[3]
+  local idlist, ret_type, block, tpars = exp[1], exp[2], exp[3], exp[4]
   if (ret_type == false) or (not kindcheck(env, ret_type)) then
     ret_type = tltype.Tuple({Any}, true)
     exp[2] = ret_type
@@ -1488,14 +1500,15 @@ local function check_localrec (env, id, exp)
     infer_return = true
   end
   tlst.begin_function(env)
-  local input_type = check_parameters(env, idlist, false, exp.pos, true)
-  --TODO: add type parameters to local recursive definitions
-  local t = tltype.Function({}, input_type, ret_type)
+  local input_type = check_parameters(env, idlist, false, exp.pos, true)  
+  local t = tltype.Function(tpars, input_type, ret_type)
   id[2] = t
   set_type(env, id, t)
   check_masking(env, id[1], id.pos)
   tlst.set_local(env, id)
   tlst.begin_scope(env)
+  for i,tpar in ipairs(tpars) do kindcheck(env, tpar[3]) end
+  set_tpars(env, tpars)
   local len = #idlist
   if len > 0 and idlist[len].tag == "Dots" then len = len - 1 end
   for k = 1, len do
@@ -2420,18 +2433,6 @@ local function make_tmethod (parlist, rettype)
   local t1 = tltype.Tuple(pars)
   local t2 = tltype.Tuple({rettype})
   return tltype.Function({}, t1, t2, true)
-end
-
--- insert a group of type variables into the environment
--- set_tpars : (env, {tpar}) -> ()
-local function set_tpars(env, tpars)
-  for _,tpar in ipairs(tpars) do
-    local name, variance, tbound = tpar[1], tpar[2], tpar[3]
-    tbound = (tbound == "NoBound") and Value or tbound
-    local ti = tlst.typeinfo_Variable(tbound, variance)
-    tlst.set_typeinfo(env, name, ti, true)
-    tlst.set_typealias(env, name, name)
-  end  
 end
 
 local function check_typedefs (env, stm)

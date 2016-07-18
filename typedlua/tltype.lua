@@ -773,7 +773,15 @@ function tltype.substitutes (t,x,s)
     
     local tparams_res = {}
     for i,tparam in pairs(t[3]) do
-      table.insert(tparams_res, tltype.substitutes(tparam, x, s))
+      local tbound = tparam[3]
+      tbound = tltype.substitutes(tbound, x, s)
+      tparams_res[#tparams_res + 1] = { 
+        tag = "TypeParam", 
+        pos = tparam.pos, 
+        [1] = tparam[1], 
+        [2] = tparam[2],
+        [3] = tbound
+      }
     end
     return tltype.PFunction(t.pos, tparams_res, tin_res, tout_res)
   elseif t.tag == "TField" then

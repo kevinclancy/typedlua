@@ -161,7 +161,7 @@ local G = lpeg.P { "TypedLua";
                tllexer.symb(">");
                   
   InvTypeParams = tllexer.symb("<") * 
-                  lpeg.Ct( lpeg.V("InvTypeParam") * (tllexer.symb(",") * lpeg.V("TypeParam"))^0 ) * 
+                  lpeg.Ct( lpeg.V("InvTypeParam") * (tllexer.symb(",") * lpeg.V("InvTypeParam"))^0 ) * 
                   tllexer.symb(">");
   
   TypeDefinition = lpeg.V("ClassDefStat") + lpeg.V("StructuralTypedef") + lpeg.V("InterfaceDefStat");
@@ -321,7 +321,7 @@ local G = lpeg.P { "TypedLua";
             lpeg.Cp() / tlast.parList0;
   TypedVarArg = lpeg.Cp() * tllexer.symb("...") * (tllexer.symb(":") * lpeg.V("Type"))^-1 /
                 tlast.identDots;
-  FuncBody = lpeg.Cp() * (lpeg.V("InvTypeParams") + lpeg.Cc(false)) * tllexer.symb("(") * lpeg.V("ParList") * tllexer.symb(")") *
+  FuncBody = lpeg.Cp() * (lpeg.V("InvTypeParams") + lpeg.Cc({})) * tllexer.symb("(") * lpeg.V("ParList") * tllexer.symb(")") *
              (tllexer.symb(":") * lpeg.V("RetType") + lpeg.Cc(false)) *
              lpeg.V("Block") * tllexer.kw("end") / tlast.exprFunction;
   FuncStat = lpeg.Cp() * (tllexer.kw("const") * lpeg.Cc(true) + lpeg.Cc(false)) *
