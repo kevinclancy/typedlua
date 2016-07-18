@@ -2422,6 +2422,7 @@ local function set_tpars(env, tpars)
     tbound = (tbound == "NoBound") and Value or tbound
     local ti = tlst.typeinfo_Variable(tbound, variance)
     tlst.set_typeinfo(env, name, ti, true)
+    tlst.set_typealias(env, name, name)
   end  
 end
 
