@@ -819,27 +819,29 @@ function tltype.clone(t)
   return tltype.substitute(t,"!",tltype.Void())
 end
 
-function tltype.unfold (env, t)
-  if t == nil then
-    assert(false)
-  end
+
+local function unfold_aux (memo, env, t)
+  local s = tltype.tostring(t)
+  if memo[s] then return tltype.Any() end
+  memo[s] = true
   if t.tag == "TSymbol" then
     local ti = tlst.get_typeinfo(env,t[1])
     if ti.tag == "TIUserdata" then
-      return ti[1]
+      return unfold_aux(memo, env, ti[1])
     elseif ti.tag == "TIStructural" then
-      return ti[1]
+      return unfold_aux(memo, env, ti[1])
     elseif ti.tag == "TIVariable" then
-      return ti[1]
+      return unfold_aux(memo, env, ti[1])
     elseif ti.tag == "TINominal" then
       local params = ti[2]
       local args = t[2]
       if #params == #args then
         local par_names = {}
         for i,par in ipairs(params) do par_names[i] = par[1] end
-        return tltype.substitutes(ti[1], par_names, args)
+        local sub = tltype.substitutes(ti[1], par_names, args)
+        return unfold_aux(memo, env, sub)
       elseif (not args) and #params == 0 then
-        return ti[1]
+        return unfold_aux(memo, env, ti[1])
       else
         return tltype.Any()
       end
@@ -848,6 +850,11 @@ function tltype.unfold (env, t)
     return t
   end
 end
+
+function tltype.unfold (env, t)
+  return unfold_aux({}, env, t)
+end
+
 
 local function check_recursive (t, name)
   if tltype.isLiteral(t) or

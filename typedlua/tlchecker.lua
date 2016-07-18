@@ -220,6 +220,8 @@ local function kindcheck_arity (env, t)
           typeerror(env, "kind", msg, t.pos)
           return false
         end
+        
+        return true
       else
         if #args > 0 then
           local msg = string.format("Only class/interface types should be supplied type arguments")
