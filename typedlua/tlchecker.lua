@@ -1267,10 +1267,11 @@ local function check_call (env, exp)
         for i,tparam in ipairs(tparams) do
           local name, variance = tparam[1], tparam[2]
           assert(variance == "Invariant")
-          if not tltype.subtype(env, targs[i], substituted_bounds[i]) then
+          local succ, explanation = tltype.consistent_subtype(env, targs[i], substituted_bounds[i])
+          if not succ then
             local msg = "type argument %s is not a subtype of bound %s"
             msg = string.format(msg, tltype.tostring(targs[i]), tltype.tostring(substituted_bounds[i]))
-            typeerror(env, "call", msg, targs[i].pos)
+            typeerror(env, "call", msg .. "\n" .. explanation, targs[i].pos)
             tinput = tltype.substitute(tinput, name, Any)
             tret = tltype.substitute(tret, name, Any)
           end
