@@ -392,9 +392,10 @@ local function kindcheck (env, t)
             local bound = tpar[3] 
             if bound ~= "NoBound" then
               bound = tltype.substitutes(bound, names, args)
-              if not tltype.consistent_subtype(env, args[i], bound) then
+              local succ, explanation = tltype.consistent_subtype(env, args[i], bound) 
+              if not succ then
                 local msg = string.format("%s is not a subtype of %s", tltype.tostring(args[i]), tltype.tostring(bound))
-                typeerror(env, "kind", msg, args[i].pos)
+                typeerror(env, "kind", msg .. "\n" .. explanation, args[i].pos)
                 args[i] = Any
               end
             end
@@ -1170,13 +1171,18 @@ end
 
 local function check_arguments (env, func_name, dec_type, infer_type, pos)
   local msg = "attempt to pass '%s' to %s of input type '%s'"
-  if tltype.subtype(env, infer_type, dec_type) then
-  elseif tltype.consistent_subtype(env, infer_type, dec_type) then
-    msg = string.format(msg, tltype.tostring(infer_type), func_name, tltype.tostring(dec_type))
-    typeerror(env, "any", msg, pos)
-  else
-    msg = string.format(msg, tltype.tostring(infer_type), func_name, tltype.tostring(dec_type))
-    typeerror(env, "args", msg, pos)
+  local sub_succ, sub_explanation = tltype.subtype(env, infer_type, dec_type) 
+  if not sub_succ then
+    local cs_succ, cs_explanation = tltype.consistent_subtype(env, infer_type, dec_type)
+    if cs_succ then 
+      msg = string.format(msg, tltype.tostring(infer_type), func_name, tltype.tostring(dec_type))
+      msg = msg .. "\n" .. sub_explanation
+      typeerror(env, "any", msg, pos)
+    else
+      msg = string.format(msg, tltype.tostring(infer_type), func_name, tltype.tostring(dec_type))
+      msg = msg .. "\n" .. cs_explanation
+      typeerror(env, "args", msg, pos)
+    end
   end
 end
 
@@ -2554,14 +2560,14 @@ local function check_typedefs (env, stm)
     end
   end
   
-  --add nominal edges for each inheritance clause in the bundle
+  --add reflexive nominal edges and nominal edges for each inheritance clause in the bundle
   for _,def in ipairs(defs) do
     if def.tag == "Class" then
-      local tsuper = def[4]
+      local name, tsuper = def[1], def[4]
+      local typename = current_modname(env) .. def[1][1]
+      --tlst.add_nominal_edge(env, typename, typename, , tltype.substitutes, env.scope > 1)
       if tsuper ~= "NoParent" then
-        local name, tsuper_inst = def[1], def[4]
-        local typename = current_modname(env) .. name[1]
-        tlst.add_nominal_edge(env, typename, tsuper_inst[1], tsuper_inst[2], tltype.substitutes, env.scope > 1)
+        tlst.add_nominal_edge(env, typename, tsuper[1], tsuper[2], tltype.substitutes, env.scope > 1)
       end
     end
   end
@@ -2715,7 +2721,8 @@ local function check_typedefs (env, stm)
       local t_instance,_,_,_ = get_class_types(env, def)
       for i,t in ipairs(interfaces) do
         assert(t.tag == "TSymbol")
-        if tltype.consistent_subtype(env, t_instance, tltype.unfold(env, t)) then
+        local succ, explanation = tltype.consistent_subtype(env, t_instance, tltype.unfold(env, t))
+        if succ then
           env.scope = env.scope - 1 --add nominal edge to the scope above this class's scope
           tlst.add_nominal_edge(env, typename, t[1], t[2], tltype.substitutes, env.scope > 1)
           env.scope = env.scope + 1
@@ -2725,7 +2732,7 @@ local function check_typedefs (env, stm)
           local def_tsymbol = tltype.Symbol(current_modname(env) .. name[1], par_tsymbols)
           local msg = "%s is not a subtype of %s"
           msg = string.format(msg, tltype.tostring(def_tsymbol), tltype.tostring(t))
-          typeerror(env, "inheritance", msg, t.pos)
+          typeerror(env, "inheritance", msg .. "\n" .. explanation, t.pos)
         end
       end
       tlst.end_scope(env) end -- class type parameters

@@ -56,11 +56,11 @@ function tlst.typeinfo_Variable (tbound, variance)
   return { tag = "TIVariable", [1] = tbound, [2] = variance }
 end
 
-function tlst.get_all_nominal_edges (env, tisource, edge_map_out)
+function tlst.get_all_nominal_edges (env, source, edge_map_out)
   local scope = env.scope
   for s = scope, 1, -1 do
-    if env[s].nominal_edges[tisource] then
-      for _,edges in pairs(env[s].nominal_edges[tisource]) do
+    if env[s].nominal_edges[source] then
+      for _,edges in pairs(env[s].nominal_edges[source]) do
         for k,edge in ipairs(edges) do
           edge_map_out[k] = edge
         end
@@ -68,8 +68,8 @@ function tlst.get_all_nominal_edges (env, tisource, edge_map_out)
     end
   end
   
-  if env.genv.nominal_edges[tisource] then
-    for _,edges in pairs(env.genv.nominal_edges[tisource]) do
+  if env.genv.nominal_edges[source] then
+    for _,edges in pairs(env.genv.nominal_edges[source]) do
       for k,edge in ipairs(edges) do
         edge_map_out[k] = edge
       end
@@ -78,7 +78,9 @@ function tlst.get_all_nominal_edges (env, tisource, edge_map_out)
 end
 
 -- get_nominal_edges : (env,typeinfo,typeinfo,out {{type}}) -> ()
-function tlst.get_nominal_edges (env, tisource, tidest, array_out)
+function tlst.get_nominal_edges (env, source, dest, array_out)
+  local tisource = tlst.get_typeinfo(env, source)
+  local tidest = tlst.get_typeinfo(env, dest)
   assert(tisource.tag == "TINominal" and tidest.tag == "TINominal")
   if tisource == tidest then
     local targs = {}
@@ -94,8 +96,8 @@ function tlst.get_nominal_edges (env, tisource, tidest, array_out)
   for i,_ in ipairs(array_out) do array_out[i] = nil end
   local scope = env.scope
   for s = scope, 1, -1 do
-    if env[s].nominal_edges[tisource] then
-      local edges = env[s].nominal_edges[tisource][tidest]
+    if env[s].nominal_edges[source] then
+      local edges = env[s].nominal_edges[source][dest]
       if edges then
         for _,edge in ipairs(edges) do
           array_out[#array_out + 1] = edge
@@ -104,8 +106,8 @@ function tlst.get_nominal_edges (env, tisource, tidest, array_out)
     end
   end  
   
-  if env.genv.nominal_edges[tisource] then
-    local edges = env.genv.nominal_edges[tisource][tidest]
+  if env.genv.nominal_edges[source] then
+    local edges = env.genv.nominal_edges[source][dest]
     if edges then
       for _,edge in ipairs(edges) do
         array_out[#array_out + 1] = edge
@@ -126,20 +128,20 @@ function tlst.add_nominal_edge (env, source, dest, instantiation, subst, is_loca
   assert(#instantiation == #dest_params)
   
   local dest_edges = {}
-  tlst.get_all_nominal_edges(env, ti_dest, dest_edges)
+  tlst.get_all_nominal_edges(env, dest, dest_edges)
   
   local nominal_edges = is_local and env[s].nominal_edges or env.genv.nominal_edges
   
   -- add direct edge
-  nominal_edges[ti_source] = nominal_edges[ti_source] or {}
-  local src_edges = nominal_edges[ti_source]
-  src_edges[ti_dest] = src_edges[ti_dest] or {}
-  local src_dest_edges = src_edges[ti_dest]
+  nominal_edges[source] = nominal_edges[source] or {}
+  local src_edges = nominal_edges[source]
+  src_edges[dest] = src_edges[dest] or {}
+  local src_dest_edges = src_edges[dest]
   src_dest_edges[#src_dest_edges + 1] = { path = {ti_source}, inst = instantiation }
   
   -- add transitive edges
   for ti_parent, edge in ipairs(dest_edges) do
-    local edges_to_parent = src_edges[ti_dest]
+    local edges_to_parent = src_edges[dest]
     
     --checking for cycles should be done externally
     assert(ti_parent ~= ti_source)

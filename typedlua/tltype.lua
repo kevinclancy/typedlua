@@ -10,6 +10,22 @@ local tlst = require "typedlua.tlst"
 
 tltype.integer = false
 
+local function order_description(i)
+  local s = tostring(i)
+  local c = s[#s]
+  if c == '0' then
+    return s .. "th"
+  elseif i == 1 then
+    return s .. "st"
+  elseif i == 2 then
+    return s .. "nd"
+  elseif i == 3 then
+    return s .. "rd"
+  else
+    return s .. "th"
+  end
+end
+
 -- literal types
 
 -- Literal : (boolean|number|string) -> (type)
@@ -909,22 +925,22 @@ end
 local subtype
 
 local function subtype_literal (assume, env, t1, t2)
-  if tltype.isLiteral(t1) and tltype.isLiteral(t2) then
-    return t1[1] == t2[1]
+  if tltype.isLiteral(t1) and tltype.isLiteral(t2) and (t1[1] == t2[1]) then
+    return true
   elseif tltype.isLiteral(t1) and tltype.isBase(t2) then
-    if tltype.isBoolean(t2) then
-      return tltype.isFalse(t1) or tltype.isTrue(t1)
-    elseif tltype.isNumber(t2) then
-      return tltype.isNum(t1)
-    elseif tltype.isString(t2) then
-      return tltype.isStr(t1)
-    elseif tltype.isInteger(t2) then
-      return tltype.isInt(t1)
+    if tltype.isBoolean(t2) and (tltype.isFalse(t1) or tltype.isTrue(t1)) then
+      return true
+    elseif tltype.isNumber(t2) and tltype.isNum(t1) then
+      return true
+    elseif tltype.isString(t2) and tltype.isStr(t1) then
+      return true
+    elseif tltype.isInteger(t2) and tltype.isInt(t1) then
+      return true
     else
-      return false
+      return false, string.format("%s is not a subtype of %s", tltype.tostring(t1), tltype.tostring(t2))
     end
   else
-    return false
+    return false, string.format("%s is not a subtype of %s", tltype.tostring(t1), tltype.tostring(t2))
   end
 end
 
@@ -932,16 +948,8 @@ local function subtype_base (assume,env, t1, t2)
   if tltype.isBase(t1) and tltype.isBase(t2) then
     return t1[1] == t2[1] or (tltype.isInteger(t1) and tltype.isNumber(t2))
   else
-    return false
+    return false, string.msg("%s is not a subtype of %s", tltype.tostring(t1), tltype.tostring(t2))
   end
-end
-
-local function subtype_nil (assume, env, t1, t2)
-  return tltype.isNil(t1) and tltype.isNil(t2)
-end
-
-local function subtype_top (assume, env, t1, t2)
-  return tltype.isValue(t2)
 end
 
 local function subtype_any (assume, env, t1, t2, relation)
@@ -956,51 +964,123 @@ local function subtype_self (assume, env, t1, t2)
   return tltype.isSelf(t1) and tltype.isSelf(t2)
 end
 
-local function subtype_union (assume, env, t1, t2, relation)
+local function subtype_union (assume, env, t1, t1_str, t2, t2_str, relation)
   if tltype.isUnion(t1) then
     for k, v in ipairs(t1) do
-      if not subtype(assume, env, v, t2, relation) then
-        return false
+      local succ, msg = subtype(assume, env, v, t2, relation) 
+      if not succ then
+        return false, string.format("\n%s is not a subtype of %s", t1_str, t2_str) .. msg 
       end
     end
     return true
   elseif tltype.isUnion(t2) then
+    local msgs = ""
     for k, v in ipairs(t2) do
-      if subtype(assume, env, t1, v, relation) then
+      local succ, msg = subtype(assume, env, t1, v, relation)
+      if succ then
         return true
+      else
+        msgs = msgs .. "\n " .. msg
       end
     end
-    return false
+    return false, string.format("%s is not a subtype of any element of %s", t1_str, t2_str) .. "\n" .. msgs
   else
-    return false
+    error("expected t1 or t2 to be a union")
   end
 end
 
-local function subtype_function (assume, env, t1, t2, relation)
+local function subtype_function (assume, env, t1, t1_str, t2, t2_str, relation)
   if tltype.isFunction(t1) and tltype.isFunction(t2) then
-    return subtype(assume, env, t2[1], t1[1], relation) and subtype(assume, env, t1[2], t2[2], relation)
+    local succ1, msg1 = subtype(assume, env, t2[1], t1[1], relation)
+    if not succ1 then
+      local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
+      return false, problem .. "\n" .. msg1
+    end
+    local succ2, msg2 = subtype(assume, env, t1[2], t2[2], relation) 
+    if not succ2 then
+      local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
+      return false, problem .. "\n" .. msg2
+    end
+    return true
   else
-    return false
+    return false, string.format("%s is not a subtype of %s", t1_str, t2_str)
   end
 end
 
 local function subtype_field (assume, env, f1, f2, relation)
   if tltype.isField(f1) and tltype.isField(f2) then
-    return subtype(assume, env, f2[1], f1[1], relation) and
-           subtype(assume, env, f1[2], f2[2], relation) and
-           subtype(assume, env, f2[2], f1[2], relation)
+    local succ, explanation = subtype(assume, env, f2[1], f1[1], relation)
+    if not succ then
+      local problem = "%s is not a subtype of %s"
+      local f1_str, f2_str = tltype.tostring(f1), tltype.tostring(f2)
+      problem = string.format(problem, f1_str, f2_str)
+      return false, problem .. "\n" .. explanation
+    end
+    
+    succ, explanation = subtype(assume, env, f1[2], f2[2], relation)
+    if not succ then
+      local problem = "%s is not a subtype of %s"
+      local f1_str, f2_str = tltype.tostring(f1), tltype.tostring(f2)
+      problem = string.format(problem, f1_str, f2_str)
+      return false, problem .. "\n" .. explanation
+    end
+    
+    succ, explanation = subtype(assume, env, f2[2], f1[2], relation)
+    if not succ then
+      local problem = "%s is not a subtype of %s"
+      local f1_str, f2_str = tltype.tostring(f1), tltype.tostring(f2)
+      problem = string.format(problem, f1_str, f2_str)
+      return false, problem .. "\n" .. explanation      
+    end
+    
+    return true
   elseif tltype.isField(f1) and tltype.isConstField(f2) then
-    return subtype(assume, env, f2[1], f1[1], relation) and
-           subtype(assume, env, f1[2], f2[2], relation)
+    local succ, explanation = subtype(assume, env, f2[1], f1[1], relation)
+    if not succ then
+      local problem = "%s is not a subtype of %s"
+      local f1_str, f2_str = tltype.tostring(f1), tltype.tostring(f2)
+      problem = string.format(problem, f1_str, f2_str)
+      return false, problem .. "\n" .. explanation
+    end
+    
+    succ, explanation = subtype(assume, env, f1[2], f2[2], relation)
+    if not succ then
+      local problem = "%s is not a subtype of %s"
+      local f1_str, f2_str = tltype.tostring(f1), tltype.tostring(f2)
+      problem = string.format(problem, f1_str, f2_str)
+      return false, problem .. "\n" .. explanation
+    end
+    
+    return true
   elseif tltype.isConstField(f1) and tltype.isConstField(f2) then
-    return subtype(assume, env, f2[1], f1[1], relation) and
-           subtype(assume, env, f1[2], f2[2], relation)
+    local succ, explanation = subtype(assume, env, f2[1], f1[1], relation)
+    if not succ then
+      local problem = "%s is not a subtype of %s"
+      local f1_str, f2_str = tltype.tostring(f1), tltype.tostring(f2)
+      problem = string.format(problem, f1_str, f2_str)
+      return false, problem .. "\n" .. explanation
+    end
+    
+    succ, explanation = subtype(assume, env, f1[2], f2[2], relation)
+    if not succ then
+      local problem = "%s is not a subtype of %s"
+      local f1_str, f2_str = tltype.tostring(f1), tltype.tostring(f2)
+      problem = string.format(problem, f1_str, f2_str)
+      return false, problem .. "\n" .. explanation
+    end
+    
+    return true
   else
-    return false
+    local problem = "%s is not a subtype of %s"
+    local f1_str, f2_str = tltype.tostring(f1), tltype.tostring(f2)
+    problem = string.format(problem, f1_str, f2_str)
+    local explanation = "%s is const and %s is not"
+    explanation = string.format(explanation, f1_str, f2_str)
+    return false, problem .. "\n" .. explanation
   end
 end
 
-local function subtype_table (assume, env, t1, t2, relation)
+local function subtype_table (assume, env, t1, t1_str, t2, t2_str, relation)
   if tltype.isTable(t1) and tltype.isTable(t2) then
     if t1.unique then
       local m, n = #t1, #t2
@@ -1008,13 +1088,19 @@ local function subtype_table (assume, env, t1, t2, relation)
       for i = 1, m do
         for j = 1, n do
           if subtype(assume, env, t1[i][1], t2[j][1], relation) then
-            if subtype(assume, env, t1[i][2], t2[j][2], relation) then
+            local succ, explanation = subtype(assume, env, t1[i][2], t2[j][2], relation) 
+            if succ then
               if not l[j] then
                 k = k + 1
                 l[j] = true
               end
             else
-              return false
+              local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
+              local s1, s2 = tltype.tostring(t1[i][1]), tltype.tostring(t2[j][1])
+              local s3, s4 = tltype.tostring(t1[i][2]), tltype.tostring(t2[j][2])
+              local msg = "%s is a subtype of %s, but %s is not a subtype of %s"
+              msg = string.format(msg, s1, s2, s3, s4)
+              return false, problem .. "\n" .. msg .. "\n" .. explanation
             end
           end
         end
@@ -1024,8 +1110,12 @@ local function subtype_table (assume, env, t1, t2, relation)
       else
         for j = 1, n do
           if not l[j] then
-            if not subtype(assume, env, tltype.Nil(), t2[j][2], relation) then
-              return false
+            local succ, explanation = subtype(assume, env, tltype.Nil(), t2[j][2], relation) 
+            if not succ then
+              local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
+              local msg = "%s does not have a field matching key %s, and nil is not a subtype of %s"
+              msg = string.format(msg, t1_str, tltype.tostring(t2[j][1]), tltype.tostring(t2[j][2]))
+              return false, problem .. "\n" .. msg .. "\n" .. explanation
             end
           end
         end
@@ -1037,13 +1127,19 @@ local function subtype_table (assume, env, t1, t2, relation)
       for i = 1, m do
         for j = 1, n do
           if subtype(assume, env, t1[i][1], t2[j][1], relation) then
-            if subtype_field(assume, env, t2[j], t1[i], relation) then
+            local succ, explanation = subtype_field(assume, env, t2[j], t1[i], relation) 
+            if not succ then
               if not l[j] then
                 k = k + 1
                 l[j] = true
               end
             else
-              return false
+              local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
+              local s1, s2 = tltype.tostring(t1[i][1]), tltype.tostring(t2[j][1])
+              local s3, s4 = tltype.tostring(t2[j]), tltype.tostring(t1[i])
+              local msg = "%s is a subtype of %s, but %s is not a subtype of %s"
+              msg = string.format(msg, s1, s2, s3, s4)
+              return false, problem .. "\n" .. msg .. "\n" .. explanation              
             end
           end
         end
@@ -1053,8 +1149,12 @@ local function subtype_table (assume, env, t1, t2, relation)
       else
         for j = 1, n do
           if not l[j] then
-            if not subtype(assume, env, tltype.Nil(), t2[j][2], relation) then
-              return false
+            local succ, explanation = subtype(assume, env, tltype.Nil(), t2[j][2], relation) 
+            if not succ then
+              local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
+              local msg = "%s does not have a field matching key %s, and nil is not a subtype of %s"
+              msg = string.format(msg, t1_str, tltype.tostring(t2[j][1]), tltype.tostring(t2[j][2]))
+              return false, problem .. "\n" .. msg .. "\n" .. explanation
             end
           end
         end
@@ -1064,32 +1164,42 @@ local function subtype_table (assume, env, t1, t2, relation)
       local m, n = #t1, #t2
       for i = 1, n do
         local subtype = false
+        local msgs = ""
         for j = 1, m do
-          if subtype_field(assume, env, t1[j], t2[i], relation) then
+          local succ, explanation = subtype_field(assume, env, t1[j], t2[i], relation)
+          if succ then
             subtype = true
             break
+          else
+            msgs = msgs .. "\n" .. explanation
           end
         end
-        if not subtype then return false end
+        if not subtype then 
+          local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
+          local msg = "field %s is not a supertype of any field of %s"
+          msg = string.format(msg, tltype.tostring(t2[i]), t1_str)
+          return false, problem .. "\n" .. msg .. msgs
+        end
       end
       return true
     end
   else
-    return false
+    local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
+    return false, problem
   end
+  assert(false)
 end
 
-local function subtype_symbol (assume, env, t1, t2, relation)
+local function subtype_symbol (assume, env, t1, t1_str, t2, t2_str, relation)
   local t1_symbol = tltype.isSymbol(t1)
   local t2_symbol = tltype.isSymbol(t2)
   
   local ti1 = t1_symbol and tlst.get_typeinfo(env,t1[1])
   local ti2 = t2_symbol and tlst.get_typeinfo(env,t2[1])
   
-  if not ((not t1_symbol) or ti1) then
-    assert(false)
-  end
-  
+  local problem = "%s is not a subtype of %s"
+  problem = string.format(problem, t1_str, t2_str)    
+      
   -- handle bounded variables
   if t1_symbol and ti1.tag == "TIVariable" then
     if ti1 == ti2 then
@@ -1097,52 +1207,65 @@ local function subtype_symbol (assume, env, t1, t2, relation)
     elseif ti1[1] ~= "NoBound" then
       return subtype(assume, env, ti1[1], t2, relation)  
     else
-      return false
+      return false, problem
     end
   end
-  if ti2 == nil then
-    assert(false)
-  end
+  
   if t2_symbol and ti2.tag == "TIVariable" then
-    return false
+    return false, problem
   end    
   
   --handle userdata
   if t1_symbol and ti1.tag == "TIUserdata" then
-    return tltype.isSymbol(t2) and tlst.get_typeinfo(env,t2[1]) == ti1
+    if tltype.isSymbol(t2) and tlst.get_typeinfo(env,t2[1]) == ti1 then
+      return true
+    else
+      return false, problem
+    end
   end 
   
   if t2_symbol and ti2.tag == "TIUserdata" then
     --we know t1 isn't a userdata, so the subtype relation does not hold
-    return false
+    return false, problem
   end 
   
   --handle structural
   if t1_symbol and ti1.tag == "TIStructural" then
-    return subtype(assume, env, ti1[1], t2, relation)
+    local succ, explanation = subtype(assume, env, ti1[1], t2, relation)
+    if succ then
+      return true
+    else
+      return false, problem .. "\n" .. explanation
+    end
   end 
   
   if t2_symbol and ti2.tag == "TIStructural" then
-    return subtype(assume, env, t1, ti2[1], relation)
+    local succ, explanation = subtype(assume, env, t1, ti2[1], relation)
+    if succ then
+      return true
+    else
+      return false, problem .. "\n" .. explanation
+    end
   end 
   
   if t1_symbol and ti1.tag == "TINominal" and t2_symbol and ti2.tag == "TINominal" then
     local nominal_edges = {}
-    tlst.get_nominal_edges(env,ti1,ti2,nominal_edges)
+    tlst.get_nominal_edges(env,t1[1],t2[1],nominal_edges)
     
     local pars1 = ti1[2]
     local pars2 = ti2[2]
 
+    local par_names1 = {}
+    for i,par in ipairs(pars1) do
+      par_names1[i] = par[1]
+    end
+        
+    local edge_explanations = ""
     for _,edge in ipairs(nominal_edges) do
       local path = edge.path
       local inst = edge.inst
       
       assert(#inst == #pars2)
-      
-      local par_names1 = {}
-      for i,par in ipairs(pars1) do
-        par_names1[i] = par[1]
-      end
       
       local new_inst = {}
       for i,t in ipairs(inst) do
@@ -1153,115 +1276,189 @@ local function subtype_symbol (assume, env, t1, t2, relation)
         
       local args2 = t2[2]
       local incompatible = false
+      local targ_msg = ""
       for i,arg in ipairs(args2) do
         local variance = pars2[i][2]
         if variance == "Covariant" then
-          if not subtype(assume,env,new_inst[i],arg,relation) then
+          local succ, explanation = subtype(assume,env,new_inst[i],arg,relation)
+          if not succ then
+            targ_msg = targ_msg or explanation
             incompatible = true
           end
         elseif variance == "Contravariant" then
-          if not subtype(assume,env,arg,new_inst[i],relation) then
-            incompatible = true
+          local succ, explanation = subtype(assume,env,arg,new_inst[i],relation)
+          if not succ then
+            targ_msg = targ_msg or explanation
+            incompatible = true          
           end            
         elseif variance == "Invariant" then
-          if not (subtype(assume,env,arg,new_inst[i],relation) and 
-                  subtype(assume,env,new_inst[i],arg,relation)) then
+          local succ, explanation = subtype(assume,env,new_inst[i],arg,relation)
+          if not succ then
+            targ_msg = targ_msg or explanation
             incompatible = true
           end
+          succ, explanation = subtype(assume,env,arg,new_inst[i],relation)
+          if not succ then
+            targ_msg = targ_msg or explanation
+            incompatible = true     
+          end         
         end
       end
       if not incompatible then
         return true
+      else
+        local t2_inst_tsymbol = tltype.tostring(tltype.Symbol(t2[1], new_inst))
+        local edge_explanation = "%s is not a subtype of %s"
+        edge_explanation = string.format(edge_explanation, t2_inst_tsymbol, t2_str)
+        edge_explanations = edge_explanations .. "\n" .. edge_explanation .. "\n" .. targ_msg
       end
     end
     
-    return false
+    local num_edges_str = "%d nominal subtyping edges considered"
+    num_edges_str = string.format(num_edges_str,#nominal_edges)
+    return false, problem .. "\n" .. num_edges_str .. "\n" .. edge_explanations
   end
 
   if t1_symbol and ti1.tag == "TINominal" and #ti1[2] == 0 then
     --there is no type polymorphism, so we can allow equirecursive structural subtyping
-    return subtype(assume, env, ti1[1], t2)
-  end
-  
-  return false
-end
-
-local function subtype_tuple (assume, env, t1, t2, relation)
-  if tltype.isTuple(t1) and tltype.isTuple(t2) then
-    local len1, len2 = #t1, #t2
-    if len1 < len2 then
-      if not tltype.isVararg(t1[len1]) then return false end
-      local i = 1
-      while i < len1 do
-        if not subtype(assume, env, t1[i], t2[i], relation) then
-          return false
-        end
-        i = i + 1
-      end
-      local j = i
-      while j <= len2 do
-        if not subtype(assume, env, t1[i], t2[j], relation) then
-          return false
-        end
-        j = j + 1
-      end
-      return true
-    elseif len1 > len2 then
-      if not tltype.isVararg(t2[len2]) then return false end
-      local i = 1
-      while i < len2 do
-        if not subtype(assume, env, t1[i], t2[i], relation) then
-          return false
-        end
-        i = i + 1
-      end
-      local j = i
-      while j <= len1 do
-        if not subtype(assume, env, t1[j], t2[i], relation) then
-          return false
-        end
-        j = j + 1
-      end
+    local succ, explanation = subtype(assume, env, ti1[1], t2)
+    if succ then
       return true
     else
-      for k, v in ipairs(t1) do
-        if not subtype(assume, env, t1[k], t2[k], relation) then
-          return false
-        end
-      end
-      return true
+      return false, problem .. "\n" .. explanation
     end
-  else
-    return false
   end
+  
+  return false, problem
+end
+
+local function subtype_tuple (assume, env, t1, t1_str, t2, t2_str, relation)
+  assert(tltype.isTuple(t1) and tltype.isTuple(t2))
+  local len1, len2 = #t1, #t2
+  if len1 < len2 then
+    if not tltype.isVararg(t1[len1]) then 
+      local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
+      return false, problem .. "\n" .. string.format("%s is shorter than %s", t1_str, t2_str) 
+    end
+    local i = 1
+    while i < len1 do
+      local succ, explanation = subtype(assume, env, t1[i], t2[i], relation)
+      if not succ then
+        local s1,s2 = tltype.tostring(t1[i]), tltype.tostring(t2[i])
+        local ord = order_description(i)
+        local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
+        local component = string.format("%dth component %s is not a subtype of %s", ord, s1, s2)
+        local msg = problem .. "\n" .. component .. "\n" .. explanation
+        return false, msg
+      end
+      i = i + 1
+    end
+    local j = i
+    while j <= len2 do
+      local succ, explanation = subtype(assume, env, t1[i], t2[j], relation)
+      if not succ then
+        local s1,s2 = tltype.tostring(t1[i]), tltype.tostring(t2[i])
+        local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
+        local ord = order_description(j)
+        local component = string.format("\nvararg type %s is not a subtype of %dth component %s", s1, ord, s2)
+        local msg = problem .. component .. "\n" .. explanation
+        return false, msg
+      end
+      j = j + 1
+    end
+    return true
+  elseif len1 > len2 then
+    if not tltype.isVararg(t2[len2]) then 
+      local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
+      return false, problem .. string.format("\n%s is longer than %s", t1_str, t2_str)
+    end
+    local i = 1
+    while i < len2 do
+      local succ, explanation = subtype(assume, env, t1[i], t2[i], relation)
+      if not succ then
+        local s1,s2 = tltype.tostring(t1[i]), tltype.tostring(t2[i])
+        local ord = order_description(i)
+        local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
+        local component = string.format("\n%dth component %s is not a subtype of %s", ord, s1, s2)
+        local msg = problem .. component .. "\n" .. explanation        
+        return false, msg
+      end
+      i = i + 1
+    end
+    local j = i
+    while j <= len1 do
+      local succ, eplanation = subtype(assume, env, t1[j], t2[i], relation)
+      if not succ then
+        local s1,s2 = tltype.tostring(t1[i]), tltype.tostring(t2[i])
+        local ord = order_description(j)
+        local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
+        local component = string.format("\n%dth component %s is not a subtype of vararg type %s", ord, s1, s2)
+        local msg = problem .. component .. "\n" .. explanation          
+        return false, msg
+      end
+      j = j + 1
+    end
+    return true
+  else
+    for k, v in ipairs(t1) do
+      local succ, explanation = subtype(assume, env, t1[k], t2[k], relation)  
+      if not succ then
+        local s1,s2 = tltype.tostring(t1[k]), tltype.tostring(t2[k])
+        local ord = order_description(k)
+        local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
+        local component = string.format("%s component", ord, s1, s2)
+        local msg = problem .. "\n" .. component .. "\n" .. explanation        
+        return false, msg        
+      end
+    end
+    return true
+  end
+  assert(false)
 end
 
 function subtype (assume, env, t1, t2, relation)
-  local key = tltype.tostring(t1) .. "@" .. tltype.tostring(t2)
+  local t1_str, t2_str = tltype.tostring(t1), tltype.tostring(t2)
+  local key =  t1_str .. "@" .. t2_str
   if assume[key] then return true end
   assume[key] = true
-  if tltype.isVoid(t1) and tltype.isVoid(t2) then
+  if relation == "<:" and tltype.isAny(t1) and tltype.isAny(t2) then
+    return true
+  elseif relation == "<:" and (tltype.isAny(t1) or tltype.isAny(t2)) then
+    return false, string.format("%s is not a subtype of %s", t1_str, t2_str)
+  elseif tltype.isAny(t1) or tltype.isAny(t2) then
+    return true
+  elseif tltype.isValue(t2) then
+    return true
+  elseif tltype.isVoid(t1) and tltype.isVoid(t2) then
     return true
   elseif tltype.isUnionlist(t1) then
     for k, v in ipairs(t1) do
-      if not subtype(assume, env, v, t2, relation) then
-        return false
+      local succ, msg = subtype(assume, env, v, t2, relation)
+      if not succ then
+        local v_str = tltype.tostring(v)
+        return false, string.format("%s is not a subtype of %s", v_str, t2_str) .. "\n" .. msg
       end
     end
     return true
   elseif tltype.isUnionlist(t2) then
+    local msgs = ""    
     for k, v in ipairs(t2) do
-      if subtype(assume, env, t1, v, relation) then
+      local succ, msg = subtype(assume, env, t1, v, relation) 
+      if succ then
         return true
+      else
+        msgs = msgs .. "\n " .. msg
       end
     end
-    return false
+    return false, string.format("%s is not a subtype of any element of %s\n", t1_str, t2_str) .. msgs
+  elseif tltype.isUnion(t1) or tltype.isUnion(t2) then
+    return subtype_union(assume, env, t1, t1_str, t2, t2_str, relation)
   elseif tltype.isTuple(t1) and tltype.isTuple(t2) then
-    return subtype_tuple(assume, env, t1, t2, relation)
+    return subtype_tuple(assume, env, t1, t1_str, t2, t2_str, relation)
   elseif tltype.isTuple(t1) and not tltype.isTuple(t2) then
-    return false
+    return false, string.format("%s is a tuple and %s is not", t1_str, t2_str)
   elseif not tltype.isTuple(t1) and tltype.isTuple(t2) then
-    return false
+    return false, string.format("%s is not a tuple, but %s is", t1_str, t2_str)
   elseif tltype.isVararg(t1) and tltype.isVararg(t2) then
     local t1_nil = tltype.Union(t1[1], tltype.Nil())
     local t2_nil = tltype.Union(t2[1], tltype.Nil())
@@ -1272,17 +1469,26 @@ function subtype (assume, env, t1, t2, relation)
   elseif not tltype.isVararg(t1) and tltype.isVararg(t2) then
     local t2_nil = tltype.Union(t2[1], tltype.Nil())
     return subtype(assume,env, t1, t2_nil, relation)
+  elseif (tltype.isLiteral(t1) and tltype.isLiteral(t2)) or 
+         (tltype.isLiteral(t1) and tltype.isBase(t2)) or 
+         (tltype.isBase(t1) and tltype.isLiteral(t2)) then
+    return subtype_literal(assume, env, t1, t2)
+  elseif tltype.isBase(t1) and tltype.isBase(t2) then
+    return subtype_base(assume, env, t1, t2)
+  elseif tltype.isNil(t1) and tltype.isNil(t2) then
+    return true
+  elseif tltype.isSelf(t1) and tltype.isSelf(t2) then
+    return true
+  elseif tltype.isSelf(t1) or tltype.isSelf(t2) then
+    return false, string.format("%s is not a subtype of %s", t1_str, t2_str)
+  elseif tltype.isFunction(t1) or tltype.isFunction(t2) then
+    return subtype_function(assume, env, t1, t1_str, t2, t2_str, relation)
+  elseif tltype.isTable(t1) or tltype.isTable(t2) then
+    return subtype_table(assume, env, t1, t1_str, t2, t2_str, relation)
+  elseif tltype.isSymbol(t1) or tltype.isSymbol(t2) then
+    return subtype_symbol(assume, env, t1, t1_str, t2, t2_str, relation)
   else
-    return subtype_literal(assume, env, t1, t2) or
-           subtype_base(assume, env, t1, t2) or
-           subtype_nil(assume, env, t1, t2) or
-           subtype_top(assume, env, t1, t2) or
-           subtype_any(assume, env, t1, t2, relation) or
-           subtype_self(assume, env, t1, t2) or
-           subtype_union(assume, env, t1, t2, relation) or
-           subtype_function(assume, env, t1, t2, relation) or
-           subtype_table(assume, env, t1, t2, relation) or
-           subtype_symbol(assume, env, t1, t2)
+    return false, string.format("%s is not a subtype of %s", t1_str, t2_str)
   end
 end
 
@@ -1484,6 +1690,10 @@ local function type2str (t, n)
     return "(" .. table.concat(l, ", ") .. ")"
   elseif tltype.isVararg(t) then
     return type2str(t[1], n-1) .. "*"
+  elseif tltype.isField(t) then
+    return "(" .. type2str(t[1], n-1) .. ":" .. type2str(t[2], n-1) .. ")"
+  elseif tltype.isConstField(t) then
+    return "(const " .. type2str(t[1], n-1) .. ":" .. type2str(t[2], n-1) .. ")"
   else
     error("trying to convert type to string but got " .. t.tag)
   end
