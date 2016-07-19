@@ -1483,10 +1483,10 @@ function subtype (assume, env, t1, t2, relation)
     return false, string.format("%s is not a subtype of %s", t1_str, t2_str)
   elseif tltype.isFunction(t1) or tltype.isFunction(t2) then
     return subtype_function(assume, env, t1, t1_str, t2, t2_str, relation)
+  elseif tltype.isSymbol(t1) or tltype.isSymbol(t2) then
+    return subtype_symbol(assume, env, t1, t1_str, t2, t2_str, relation)      
   elseif tltype.isTable(t1) or tltype.isTable(t2) then
     return subtype_table(assume, env, t1, t1_str, t2, t2_str, relation)
-  elseif tltype.isSymbol(t1) or tltype.isSymbol(t2) then
-    return subtype_symbol(assume, env, t1, t1_str, t2, t2_str, relation)
   else
     return false, string.format("%s is not a subtype of %s", t1_str, t2_str)
   end
