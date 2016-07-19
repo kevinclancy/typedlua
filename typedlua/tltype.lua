@@ -1316,7 +1316,7 @@ local function subtype_symbol (assume, env, t1, t1_str, t2, t2_str, relation)
     
     local num_edges_str = "%d nominal subtyping edges considered"
     num_edges_str = string.format(num_edges_str,#nominal_edges)
-    return false, problem .. "\n" .. num_edges_str .. "\n" .. edge_explanations
+    return false, problem .. "\n" .. num_edges_str .. edge_explanations
   end
 
   if t1_symbol and ti1.tag == "TINominal" and #ti1[2] == 0 then
