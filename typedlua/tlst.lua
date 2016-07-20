@@ -60,18 +60,20 @@ function tlst.get_all_nominal_edges (env, source, edge_map_out)
   local scope = env.scope
   for s = scope, 1, -1 do
     if env[s].nominal_edges[source] then
-      for _,edges in pairs(env[s].nominal_edges[source]) do
-        for k,edge in ipairs(edges) do
-          edge_map_out[k] = edge
+      for k,edges in pairs(env[s].nominal_edges[source]) do
+        edge_map_out[k] = edge_map_out[k] or {}
+        for _,edge in ipairs(edges) do
+          edge_map_out[k][#edge_map_out[k] + 1] = edge
         end
       end
     end
   end
   
   if env.genv.nominal_edges[source] then
-    for _,edges in pairs(env.genv.nominal_edges[source]) do
-      for k,edge in ipairs(edges) do
-        edge_map_out[k] = edge
+    for k,edges in pairs(env.genv.nominal_edges[source]) do
+      edge_map_out[k] = edge_map_out[k] or {}
+      for _,edge in ipairs(edges) do
+        edge_map_out[k][#edge_map_out[k] + 1] = edge
       end
     end    
   end
@@ -137,28 +139,30 @@ function tlst.add_nominal_edge (env, source, dest, instantiation, subst, is_loca
   local src_edges = nominal_edges[source]
   src_edges[dest] = src_edges[dest] or {}
   local src_dest_edges = src_edges[dest]
-  src_dest_edges[#src_dest_edges + 1] = { path = {ti_source}, inst = instantiation }
+  src_dest_edges[#src_dest_edges + 1] = { path = {source}, inst = instantiation }
   
   -- add transitive edges
-  for ti_parent, edge in ipairs(dest_edges) do
-    local edges_to_parent = src_edges[dest]
-    
-    --checking for cycles should be done externally
-    assert(ti_parent ~= ti_source)
-    
-    local dest_param_names = {}
-    for i,v in ipairs(dest_params) do dest_param_names[i] = v[1] end
-    local new_instantiation = {}
-    for j,t in ipairs(edge.inst) do
-      new_instantiation[j] = subst(t, dest_param_names, instantiation)
+  for to, dest_to_ancestor in pairs(dest_edges) do
+    src_edges[to] = src_edges[to] or {}
+    local src_to_ancestor = src_edges[to]
+    for _,edge in ipairs(dest_to_ancestor) do
+      --checking for cycles should be done externally
+      assert(to ~= source)
+      
+      local dest_param_names = {}
+      for i,v in ipairs(dest_params) do dest_param_names[i] = v[1] end
+      local new_instantiation = {}
+      for j,t in ipairs(edge.inst) do
+        new_instantiation[j] = subst(t, dest_param_names, instantiation)
+      end
+      
+      local new_path = { source }
+      for j,typename in ipairs(edge.path) do
+        new_path[j+1] = typename
+      end
+
+      src_to_ancestor[#src_to_ancestor + 1] = { path = new_path, inst = new_instantiation }
     end
-    
-    local new_path = { ti_source }
-    for j,ti in ipairs(edge.path) do
-      new_path[j+1] = ti
-    end
-    
-    edges_to_parent[#edges_to_parent + 1] = { path = new_path, inst = new_instantiation }
   end
 end
 
