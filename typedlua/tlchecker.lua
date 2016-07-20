@@ -2449,12 +2449,7 @@ local function check_typedefs (env, stm)
   local bundle_typenames = {}
   --collect typenames and check for duplicates
   for _,def in ipairs(defs) do
-    local name 
-    if def.tag == "Class" or def.tag == "Interface" then
-      name = def[1][1]
-    elseif def.tag == "Typedef" then
-      name = def[1]
-    end
+    local name = def[1][1]
     name = current_modname(env) .. name
     if tlst.get_typeinfo(env, name) or bundle_typenames[name] then
       local msg = "attempt to redeclare type '%s'"
@@ -2528,7 +2523,7 @@ local function check_typedefs (env, stm)
   -- insert type stubs for bundle definitions, for the purpose of arity kindchecking
   for _,def in ipairs(defs) do
     if def.tag == "Typedef" then
-      local name = def[1]
+      local name = def[1][1]
       local typename = current_modname(env) .. name
       local ti = tlst.typeinfo_Structural(Any)
       tlst.set_typeinfo(env, typename, ti, env.scope > 1)
@@ -2577,7 +2572,7 @@ local function check_typedefs (env, stm)
   -- and method covariance checking
   for _,def in ipairs(defs) do
     if def.tag == "Typedef" then
-      local name,t = def[1],def[2]
+      local name,t = def[1][1],def[2]
       local typename = current_modname(env) .. name
       local ti = tlst.typeinfo_Structural(t)
       tlst.set_typeinfo(env, typename, ti, env.scope > 1)
