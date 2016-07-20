@@ -945,10 +945,11 @@ local function subtype_literal (assume, env, t1, t2)
 end
 
 local function subtype_base (assume,env, t1, t2)
-  if tltype.isBase(t1) and tltype.isBase(t2) then
-    return t1[1] == t2[1] or (tltype.isInteger(t1) and tltype.isNumber(t2))
+  assert(tltype.isBase(t1) and tltype.isBase(t2))
+  if t1[1] == t2[1] or (tltype.isInteger(t1) and tltype.isNumber(t2)) then
+    return true
   else
-    return false, string.msg("%s is not a subtype of %s", tltype.tostring(t1), tltype.tostring(t2))
+    return false, string.format("%s is not a subtype of %s", tltype.tostring(t1), tltype.tostring(t2))
   end
 end
 
@@ -1022,6 +1023,9 @@ local function subtype_field (assume, env, f1, f2, relation)
       local problem = "%s is not a subtype of %s"
       local f1_str, f2_str = tltype.tostring(f1), tltype.tostring(f2)
       problem = string.format(problem, f1_str, f2_str)
+      if explanation == nil then
+        assert(false)
+      end
       return false, problem .. "\n" .. explanation
     end
     
