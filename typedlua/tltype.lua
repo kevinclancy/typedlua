@@ -318,6 +318,10 @@ function tltype.PUnion (pos, ...)
 end
 
 function tltype.simplifyUnion (env, t)
+  if t == nil then
+    assert(false)
+  end
+  
   if t.tag == "TUnion" then
     local l1 = t
     -- remove unions of unions
@@ -768,12 +772,12 @@ function tltype.substitutes (t,x,s)
       res[i] = tltype.substitutes(t[i],x,s)
     end
     return res
-  elseif t.tag == "TUnionList" then
+  elseif t.tag == "TUnionlist" then
     local res = {}
     for i,union_element in ipairs(t) do
       res[i] = tltype.substitutes(t[i],x,s)
     end
-    return tltype.PUnionList(t.pos, res)  
+    return tltype.PUnionlist(t.pos, res)  
   elseif t.tag == "TFunction" then
     local tin_res = tltype.substitutes(t[1],x,s)
     local tout_res = tltype.substitutes(t[2],x,s)
@@ -1213,6 +1217,10 @@ local function subtype_symbol (assume, env, t1, t1_str, t2, t2_str, relation)
     else
       return false, problem
     end
+  end
+  
+  if t2_symbol and not ti2 then
+    assert(false)
   end
   
   if t2_symbol and ti2.tag == "TIVariable" then

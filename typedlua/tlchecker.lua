@@ -201,15 +201,21 @@ local function kindcheck_arity (env, t)
           for i,tpar in ipairs(tpars) do
             local variance = tpar[2]
             if variance == "Covariant" then
-              kindcheck_arity(env,args[i])
+              if not kindcheck_arity(env,args[i]) then
+                args[i] = Any
+              end
             elseif variance == "Contravariant" then
               env.variance = env.variance * -1
-              kindcheck_arity(env, args[i])
+              if not kindcheck_arity(env, args[i]) then
+                args[i] = Any
+              end
               env.variance = env.variance * -1
             elseif variance == "Invariant" then
               local orig_variance = env.variance
               env.variance = 0
-              kindcheck_arity(env,args[i])
+              if not kindcheck_arity(env,args[i]) then
+                args[i] = Any
+              end
               env.variance = orig_variance
             end
           end
@@ -377,15 +383,21 @@ local function kindcheck (env, t)
           for i,tpar in ipairs(tpars) do
             local variance = tpar[2]
             if variance == "Covariant" then
-              kindcheck(env,args[i])
+              if not kindcheck(env,args[i]) then
+                args[i] = Any
+              end
             elseif variance == "Contravariant" then
               env.variance = env.variance * -1
-              kindcheck(env, args[i])
+              if not kindcheck(env, args[i]) then
+                args[i] = Any
+              end
               env.variance = env.variance * -1
             elseif variance == "Invariant" then
               local orig_variance = env.variance
               env.variance = 0
-              kindcheck(env,args[i])
+              if not kindcheck(env,args[i]) then
+                args[i] = Any
+              end
               env.variance = orig_variance
             end
             
@@ -439,6 +451,37 @@ local function kindcheck (env, t)
   else
     assert("kind checking error: expected type, got " .. t.tag) 
   end  
+end
+
+local function kindcheck_tpars(env, tpars)
+  tlst.begin_scope(env)
+  set_tpars(env, tpars)
+  
+  --kindcheck the arity of bounds, as well as whether the typenames occuring
+  --in them have been defined (but don't check subtyping constraints, which might not be well-kinded)
+  for _,tpar in ipairs(tpars) do
+    local tbound = tpar[3]
+    local orig_variance = env.variance
+    env.variance = -1
+    if tbound ~= "NoBound" and not kindcheck_arity(env, tbound) then
+      tpar[3] = Any
+    end
+    env.variance = orig_variance
+  end
+ 
+  --now that we have transformed all bounds into well-kinded ones, we can perform boundchecking
+  --on our tpe parameter bounds.
+  for _,tpar in ipairs(tpars) do
+    local tbound = tpar[3]
+    local orig_variance = env.variance
+    env.variance = -1
+    if tbound ~= "NoBound" and not kindcheck(env, tbound) then
+      tpar[3] = Any
+    end
+    env.variance = orig_variance
+  end     
+  
+  tlst.end_scope(env)
 end
 
 local function check_self (env, torig, t, pos)
@@ -1497,26 +1540,24 @@ end
 
 local function check_localrec (env, id, exp)
   local idlist, ret_type, block, tpars = exp[1], exp[2], exp[3], exp[4]
+  local infer_return = (ret_type == false)
+  assert(block)
+  tlst.set_local(env,id)
+  tlst.begin_function(env) 
+  tlst.begin_scope(env) --type parameters
+  kindcheck_tpars(env, tpars)
+  set_tpars(env, tpars)
   if (ret_type == false) or (not kindcheck(env, ret_type)) then
     ret_type = tltype.Tuple({Any}, true)
     exp[2] = ret_type
   end
-  local infer_return = false
-  if not block then
-    block = ret_type
-    ret_type = tltype.Tuple({ Nil }, true)
-    infer_return = true
-  end
-  tlst.begin_function(env)
   local input_type = check_parameters(env, idlist, false, exp.pos, true)  
   local t = tltype.Function(tpars, input_type, ret_type)
   id[2] = t
   set_type(env, id, t)
   check_masking(env, id[1], id.pos)
   tlst.set_local(env, id)
-  tlst.begin_scope(env)
-  for i,tpar in ipairs(tpars) do kindcheck(env, tpar[3]) end
-  set_tpars(env, tpars)
+  tlst.begin_scope(env) --function scope
   local len = #idlist
   if len > 0 and idlist[len].tag == "Dots" then len = len - 1 end
   for k = 1, len do
@@ -1528,11 +1569,12 @@ local function check_localrec (env, id, exp)
   local r = check_block(env, block)
   if not r then tlst.set_return_type(env, tltype.Tuple({ Nil }, true)) end
   check_unused_locals(env)
-  tlst.end_scope(env)
+  tlst.end_scope(env) -- function scope
+  tlst.end_scope(env) -- type parameters
   local inferred_type = infer_return_type(env)
   if infer_return then
     ret_type = inferred_type
-    t = tltype.Function({}, input_type, ret_type)
+    t = tltype.Function(tpars, input_type, ret_type)
     id[2] = t
     set_type(env, id, t)
     tlst.set_local(env, id)
@@ -1540,6 +1582,7 @@ local function check_localrec (env, id, exp)
   end
   check_return_type(env, inferred_type, ret_type, exp.pos)
   tlst.end_function(env)
+
   return false
 end
 
@@ -2226,7 +2269,7 @@ local function kindcheck_arity_class_elems(env, elems)
       assert(success)
     elseif elem.tag == "ClassConstructor" then
       local parlist = elem[2]
-      env.variance = -1
+      env.variance = 0
       for i,par in ipairs(parlist) do
         if not kindcheck_arity(env, par[2]) then
           par[2] = Any
@@ -2467,37 +2510,10 @@ local function check_typedefs (env, stm)
   --kindcheck bounds on class and interface definitions
   for _,def in ipairs(defs) do
     if def.tag == "Class" or def.tag == "Interface" then
-      do tlst.begin_scope(env) --parameter variables
       local tpars
       if def.tag == "Class" then tpars = def[5]
       elseif def.tag == "Interface" then tpars = def[2] end
-      set_tpars(env, tpars)
-      
-      --kindcheck the arity of bounds, as well as whether the typenames occuring
-      --in them have been defined (but don't check subtyping constraints, which might not be well-kinded)
-      for _,tpar in ipairs(tpars) do
-        local tbound = tpar[3]
-        local orig_variance = env.variance
-        env.variance = -1
-        if tbound ~= "NoBound" and not kindcheck_arity(env, tbound) then
-          tpar[3] = Any
-        end
-        env.variance = orig_variance
-      end
-     
-      --now that we have transformed all bounds into well-kinded ones, we can perform boundchecking
-      --on our tpe parameter bounds.
-      for _,tpar in ipairs(tpars) do
-        local tbound = tpar[3]
-        local orig_variance = env.variance
-        env.variance = -1
-        if tbound ~= "NoBound" and not kindcheck(env, tbound) then
-          tpar[3] = Any
-        end
-        env.variance = orig_variance
-      end     
-      
-      tlst.end_scope(env) end -- class parameter variables 
+      kindcheck_tpars(env, tpars)
     end
   end
   
@@ -2517,6 +2533,7 @@ local function check_typedefs (env, stm)
           tlst.end_scope(env) --check inheritance clause
           -- we can't inherit from Any, so we just abort typechecking the budle if this happens,
           -- and leave the environment untouched by this bundle definitions
+          tlst.end_scope(env)
           return false
         end 
         tlst.end_scope(env) end --check inheritance clause
@@ -2603,7 +2620,7 @@ local function check_typedefs (env, stm)
     if def.tag == "Class" then
       local tsuper = def[4]
       if tsuper ~= "NoParent" then
-        do tlst.begin_scope(env) --check class methods covariant
+        tlst.begin_scope(env) --check class methods covariant
         --insert type parameters
         local elems, tpars = def[3], def[5]
         set_tpars(env, tpars)
@@ -2631,7 +2648,7 @@ local function check_typedefs (env, stm)
             end
           end
         end
-        tlst.end_scope(env) end --check class methods covariant
+        tlst.end_scope(env) --check class methods covariant
       end 
     end
   end
@@ -2640,7 +2657,7 @@ local function check_typedefs (env, stm)
   for _,def in ipairs(defs) do
     if def.tag == "Class" then
       local name, elems, tsuper, tpars = def[1], def[3], def[4], def[5]
-      do tlst.begin_scope(env) -- class type parameters
+      tlst.begin_scope(env) -- class type parameters
       set_tpars(env, tpars)
       for _,elem in ipairs(elems) do
         if elem.tag == "ConcreteClassMethod" then
@@ -2657,10 +2674,10 @@ local function check_typedefs (env, stm)
           end
         end
       end
-      tlst.end_scope(env) end -- class type parameters
+      tlst.end_scope(env) -- class type parameters
     elseif def.tag == "Interface" then
       local name, tpars, elems = def[1], def[2], def[3]
-      do tlst.begin_scope(env) -- class type parameters
+      tlst.begin_scope(env) -- class type parameters
       set_tpars(env, tpars)
       for _,elem in ipairs(elems) do
         if elem.tag == "AbstractClassMethod" then
@@ -2672,7 +2689,7 @@ local function check_typedefs (env, stm)
           assert(false, "interfaces can only contain abstract methods")
         end
       end
-      tlst.end_scope(env) end -- class type parameters      
+      tlst.end_scope(env) -- class type parameters      
     elseif def.tag == "Typedef" then
       if not kindcheck(env, def[2]) then
         def[2] = Any
@@ -2684,7 +2701,7 @@ local function check_typedefs (env, stm)
   --kindcheck the implements clauses of each class
   for _,def in ipairs(defs) do
     if def.tag == "Class" then
-      do tlst.begin_scope(env)
+      tlst.begin_scope(env)
       local interfaces, tpars = def[6], def[5]
       set_tpars(env, tpars)
       local new_interfaces = {}
@@ -2706,7 +2723,7 @@ local function check_typedefs (env, stm)
         end
       end
       def[6] = new_interfaces
-      tlst.end_scope(env) end -- class type parameters
+      tlst.end_scope(env) -- class type parameters
     end
   end
   
@@ -2742,7 +2759,8 @@ local function check_typedefs (env, stm)
   for _, def in ipairs(defs) do
     if def.tag == "Class" then
       local elems, tsuper, tpars = def[3], def[4], def[5]
-      --insert class type parameters
+      tlst.begin_scope(env) --class type parameters
+      set_tpars(env, tpars)
       for _,tpar in ipairs(tpars) do
         local name, variance, tbound = tpar[1], tpar[2], tpar[3]
         tbound = (tbound == "NoBound") and Value or tbound
@@ -2751,6 +2769,7 @@ local function check_typedefs (env, stm)
       end
       local t_instance, t_class, instance_members, superclass_members = get_class_types(env, def)
       check_class_code(env, elems, t_instance, instance_members, superclass_members, tsuper)
+      tlst.end_scope(env) -- class type parameters
     end
   end
   
