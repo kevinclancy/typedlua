@@ -77,7 +77,7 @@ local function set_tpars(env, tpars)
   for _,tpar in ipairs(tpars) do
     local name, variance, tbound = tpar[1], tpar[2], tpar[3]
     tbound = (tbound == "NoBound") and Value or tbound
-    local ti = tlst.typeinfo_Variable(tbound, variance)
+    local ti = tlst.typeinfo_Variable(tbound, variance, name)
     tlst.set_typeinfo(env, name, ti, true)
     tlst.set_typealias(env, name, name)
   end  
@@ -131,12 +131,12 @@ local function kindcheck_arity (env, t)
     return true
   elseif t.tag == "TFunction" then
     tlst.begin_scope(env)
-    env.variance = env.variance * -1
+    tlst.invert_variance(env)
     --check type arguments
     for i,tpar in ipairs(t[3]) do
       local name, variance, tbound = tpar[1], tpar[2], tpar[3]
       assert(variance == "Invariant")
-      local ti = tlst.typeinfo_Variable(tbound, variance)
+      local ti = tlst.typeinfo_Variable(tbound, variance, name)
       env.set_typeinfo(env, name, ti, true)
     end
     for i,tpar in ipairs(t[3]) do
@@ -148,25 +148,25 @@ local function kindcheck_arity (env, t)
     if not kindcheck_arity(env, t[1]) then
       t[1] = Any
     end
-    env.variance = env.variance * -1
+    tlst.invert_variance(env)
     if not kindcheck_arity(env, t[2]) then
       t[2] = Any
     end
     tlst.end_scope(env)
     return true
   elseif t.tag == "TField" then
-    env.variance = env.variance * -1
+    tlst.invert_variance(env)
     if not kindcheck_arity(env,t[1]) then
       t[1] = Any
     end
-    env.variance = env.variance * -1
+    tlst.invert_variance(env)
     if tltype.isConstField(t) then
       if not kindcheck_arity(env,t[2]) then
         t[2] = Any
       end
     else
       local orig_variance = env.variance
-      env.variance = 0
+      tlst.set_variance(env, "Invariant")
       if not kindcheck_arity(env,t[2]) then
         t[2] = Any
       end
@@ -205,14 +205,14 @@ local function kindcheck_arity (env, t)
                 args[i] = Any
               end
             elseif variance == "Contravariant" then
-              env.variance = env.variance * -1
+              tlst.invert_variance(env)
               if not kindcheck_arity(env, args[i]) then
                 args[i] = Any
               end
-              env.variance = env.variance * -1
+              tlst.invert_variance(env)
             elseif variance == "Invariant" then
               local orig_variance = env.variance
-              env.variance = 0
+              tlst.set_variance(env, "Invariant")
               if not kindcheck_arity(env,args[i]) then
                 args[i] = Any
               end
@@ -227,13 +227,13 @@ local function kindcheck_arity (env, t)
           typeerror(env, "kind", msg, t.pos)
           return false
         end
-        if ti[2] == "Covariant" and env.variance <= 0 then
-          local msg = "Contravariant usage of covariant type variable %s"
+        if (ti[2] == "Covariant" or ti[2] == "Bivariant") and not tlst.is_covariant(env) then
+          local msg = "Non-covariant usage of covariant type variable %s"
           msg = string.format(msg, name)
           typeerror(env, "kind", msg, t.pos)
           return false
-        elseif ti[2] == "Contravariant" and env.variance >= 0 then
-          local msg = "Covariant usage of contravariant type variable %s"
+        elseif (ti[2] == "Contravariant" or ti[2] == "Bivariant") and not tlst.is_contravariant(env) then
+          local msg = "Non-contravariant usage of contravariant type variable %s"
           msg = string.format(msg, name)
           typeerror(env, "kind", msg, t.pos)
           return false
@@ -308,12 +308,12 @@ local function kindcheck (env, t)
     return true
   elseif t.tag == "TFunction" then
     tlst.begin_scope(env)
-    env.variance = env.variance * -1
+    tlst.invert_variance(env)
     --check type arguments
     for i,tpar in ipairs(t[3]) do
       local name, variance, tbound = tpar[1], tpar[2], tpar[3]
       assert(variance == "Invariant")
-      local ti = tlst.typeinfo_Variable(tbound, variance)
+      local ti = tlst.typeinfo_Variable(tbound, variance, name)
       env.set_typeinfo(env, name, ti, true)
     end
     for i,tpar in ipairs(t[3]) do
@@ -325,25 +325,25 @@ local function kindcheck (env, t)
     if not kindcheck(env, t[1]) then
       t[1] = Any
     end
-    env.variance = env.variance * -1
+    tlst.invert_variance(env)
     if not kindcheck(env, t[2]) then
       t[2] = Any
     end
     tlst.end_scope(env)
     return true
   elseif t.tag == "TField" then
-    env.variance = env.variance * -1
+    tlst.invert_variance(env)
     if not kindcheck(env,t[1]) then
       t[1] = Any
     end
-    env.variance = env.variance * -1
+    tlst.invert_variance(env)
     if tltype.isConstField(t) then
       if not kindcheck(env,t[2]) then
         t[2] = Any
       end
     else
       local orig_variance = env.variance
-      env.variance = 0
+      tlst.set_variance(env, "Invariant")
       if not kindcheck(env,t[2]) then
         t[2] = Any
       end
@@ -387,14 +387,14 @@ local function kindcheck (env, t)
                 args[i] = Any
               end
             elseif variance == "Contravariant" then
-              env.variance = env.variance * -1
+              tlst.invert_variance(env)
               if not kindcheck(env, args[i]) then
                 args[i] = Any
               end
-              env.variance = env.variance * -1
+              tlst.invert_variance(env)
             elseif variance == "Invariant" then
               local orig_variance = env.variance
-              env.variance = 0
+              tlst.set_variance(env, "Invariant")
               if not kindcheck(env,args[i]) then
                 args[i] = Any
               end
@@ -420,13 +420,13 @@ local function kindcheck (env, t)
           typeerror(env, "kind", msg, t.pos)
           return false
         end
-        if ti[2] == "Covariant" and env.variance <= 0 then
-          local msg = "Contravariant usage of covariant type variable %s"
+        if (ti[2] == "Covariant" or ti[2] == "Bivariant") and not tlst.is_covariant(env) then
+          local msg = "Non-covariant usage of covariant type variable %s"
           msg = string.format(msg, name)
           typeerror(env, "kind", msg, t.pos)
           return false
-        elseif ti[2] == "Contravariant" and env.variance >= 0 then
-          local msg = "Covariant usage of contravariant type variable %s"
+        elseif (ti[2] == "Contravariant" or ti[2] == "Bivariant") and not tlst.is_contravariant(env) then
+          local msg = "Non-contravariant usage of contravariant type variable %s"
           msg = string.format(msg, name)
           typeerror(env, "kind", msg, t.pos)
           return false
@@ -461,24 +461,20 @@ local function kindcheck_tpars(env, tpars)
   --in them have been defined (but don't check subtyping constraints, which might not be well-kinded)
   for _,tpar in ipairs(tpars) do
     local tbound = tpar[3]
-    local orig_variance = env.variance
-    env.variance = -1
+    tlst.set_variance(env, "Contravariant")
     if tbound ~= "NoBound" and not kindcheck_arity(env, tbound) then
       tpar[3] = Any
     end
-    env.variance = orig_variance
   end
  
   --now that we have transformed all bounds into well-kinded ones, we can perform boundchecking
   --on our tpe parameter bounds.
   for _,tpar in ipairs(tpars) do
     local tbound = tpar[3]
-    local orig_variance = env.variance
-    env.variance = -1
+    tlst.set_variance(env, "Contravariant")
     if tbound ~= "NoBound" and not kindcheck(env, tbound) then
       tpar[3] = Any
     end
-    env.variance = orig_variance
   end     
   
   tlst.end_scope(env)
@@ -647,7 +643,7 @@ local function check_tl (env, name, path, pos)
   return t1
 end
 
-local function check_parameters (env, parlist, selfimplicit, pos, check_kinds)
+local function check_parameters (env, parlist, selfimplicit, pos, check_kinds, variance)
   local len = #parlist
   if len == 0 then
     if env.strict then
@@ -663,12 +659,11 @@ local function check_parameters (env, parlist, selfimplicit, pos, check_kinds)
     for i = 1, len do
       if not parlist[i][2] then parlist[i][2] = Any end
       l[i] = parlist[i][2]
-      env.variance = env.variance * -1
+      tlst.set_variance(env, variance or "Contravariant")
       if check_kinds and (not kindcheck(env, l[i])) then
         parlist[i][2] = Any
         l[i] = Any
       end
-      env.variance = env.variance * -1
     end
     if parlist[len].tag == "Dots" then
       local t = parlist[len][1] or Any
@@ -1068,7 +1063,7 @@ local function check_function (env, exp)
   for i,tpar in ipairs(tpars) do
     local name, variance, tbound = tpar[1], tpar[2], tpar[3]
     assert(variance == "Invariant")
-    local ti = tlst.typeinfo_Variable(tbound, variance)
+    local ti = tlst.typeinfo_Variable(tbound, variance, name)
     env.set_typeinfo(env, name, ti, true)
   end
   -- kindcheck all type parameter bounds
@@ -2045,7 +2040,7 @@ local function get_elem_types (env, elems)
         methods[name] = { id = elem[1], ty = t }
       elseif elem.tag == "ClassConstructor" then
         local name,parlist = elem[1][1],elem[2]
-        local t1 = check_parameters(env, parlist, false, elem.pos, false)
+        local t1 = check_parameters(env, parlist, false, elem.pos, false, "Bivariant")
         constructors[name] = { id = elem[1], ty = tltype.Function({}, t1, tltype.Void(), false) }
       elseif elem.tag == "ClassFinalizer" then
         --nothing to do here
@@ -2094,8 +2089,8 @@ local function check_constructor (env, elem, instance_members, parent_members, t
   local name, idlist, supercons_name, superargs, body, pos = elem[1], elem[2], elem[3], elem[4], elem[5], elem.pos
   tlst.begin_function(env)
   tlst.set_in_constructor(env)
-  tlst.begin_scope(env)  
-  local input_type = check_parameters(env, idlist, true, idlist.pos, true)
+  tlst.begin_scope(env)
+  local input_type = check_parameters(env, idlist, true, idlist.pos, true, "Bivariant")
   local output_type = tltype.Tuple({ Nil }, true)
   local t = tltype.Function({}, input_type, output_type)
   
@@ -2252,24 +2247,24 @@ local function kindcheck_arity_class_elems(env, elems)
   for _,elem in ipairs(elems) do
     if elem.tag == "ConcreteClassMethod" then
       local parlist,tret = elem[2], elem[3]
-      env.variance = -1      
+      tlst.set_variance(env, "Contravariant")
       for i,par in ipairs(parlist) do
         if not kindcheck_arity(env, par[2]) then
           par[2] = Any
         end
       end
-      env.variance = 1
+      tlst.set_variance(env, "Covariant")
       if not kindcheck_arity(env, tret) then
         elem[3] = Any
       end
     elseif elem.tag == "AbstractClassMethod" then
-      env.variance = 1
+      tlst.set_variance(env, "Covariant")
       local success = kindcheck_arity(env, elem[2])
       --method types are not symbols, and therefore cannot fail arity checking
       assert(success)
     elseif elem.tag == "ClassConstructor" then
       local parlist = elem[2]
-      env.variance = 0
+      tlst.set_variance(env, "Bivariant")
       for i,par in ipairs(parlist) do
         if not kindcheck_arity(env, par[2]) then
           par[2] = Any
@@ -2278,9 +2273,9 @@ local function kindcheck_arity_class_elems(env, elems)
     elseif elem.tag == "ConcreteClassField" then
       local const, ty = elem.const, elem[2]
       if not const then
-        env.variance = 0
+        tlst.set_variance(env, "Invariant")
       else
-        env.variance = 1
+        tlst.set_variance(env, "Covariant")
       end
       if not kindcheck_arity(env, ty) then
         elem[2] = Any
@@ -2296,40 +2291,39 @@ local function kindcheck_class_elems(env, elems)
   for _,elem in ipairs(elems) do
     if elem.tag == "ConcreteClassMethod" then
       local parlist,tret = elem[2], elem[3]
-      env.variance = env.variance * -1      
+      tlst.set_variance(env, "Contravariant")      
       for i,par in ipairs(parlist) do
         if not kindcheck(env, par[2]) then
           par[2] = Any
         end
       end
-      env.variance = env.variance * -1
+      tlst.set_variance(env, "Covariant")
       if not kindcheck(env, tret) then
         elem[3] = Any
       end
     elseif elem.tag == "AbstractClassMethod" then
-      env.variance = 1
+      tlst.set_variance(env, "Covariant")
       local success = kindcheck(env, elem[2])
       --method types are not symbols, and therefore cannot fail arity checking
       assert(success)      
     elseif elem.tag == "ClassConstructor" then
       local parlist = elem[2]
-      env.variance = env.variance * -1
+      tlst.set_variance(env, "Bivariant")
       for i,par in ipairs(parlist) do
         if not kindcheck(env, par[2]) then
           par[2] = Any
         end
       end      
-      env.variance = env.variance * -1
     elseif elem.tag == "ConcreteClassField" then
       local const, ty = elem.const, elem[2]
-      local orig_variance = env.variance
       if not const then
-        env.variance = 0
+        tlst.set_variance(env, "Invariant")
+      else
+        tlst.set_variance(env, "Covariant")
       end
       if not kindcheck(env, ty) then
         elem[2] = Any
       end
-      env.variance = orig_variance
     else
       assert("expected class element, but got " .. elem.tag)
     end    
@@ -2663,12 +2657,12 @@ local function check_typedefs (env, stm)
         if elem.tag == "ConcreteClassMethod" then
           local parlist, tret = elem[2], elem[3]
           for i,par in ipairs(parlist) do
-            env.variance = -1
+            tlst.set_variance(env, "Contravariant")
             if not kindcheck(env, par[2]) then
               parlist[i][2] = Any
             end
           end
-          env.variance = 1
+          tlst.set_variance(env, "Covariant")
           if not kindcheck(env, tret) then
             elem[3] = Any
           end
@@ -2682,7 +2676,7 @@ local function check_typedefs (env, stm)
       for _,elem in ipairs(elems) do
         if elem.tag == "AbstractClassMethod" then
           local name, ty = elem[1], elem[2]
-          env.variance = 1
+          tlst.set_variance(env, "Covariant")
           local success = kindcheck(env, ty)
           assert(success) --method types must be functions, so kindchecking will not fail at the top level
         else
@@ -2764,7 +2758,7 @@ local function check_typedefs (env, stm)
       for _,tpar in ipairs(tpars) do
         local name, variance, tbound = tpar[1], tpar[2], tpar[3]
         tbound = (tbound == "NoBound") and Value or tbound
-        local ti = tlst.typeinfo_Variable(tbound, variance)
+        local ti = tlst.typeinfo_Variable(tbound, variance, name)
         tlst.set_typeinfo(env, name, ti, true)
       end
       local t_instance, t_class, instance_members, superclass_members = get_class_types(env, def)
@@ -2935,6 +2929,7 @@ local function is_exit_point (block)
 end
 
 function check_block (env, block)
+  tlst.push_variance_barrier(env)
   tlst.begin_scope(env)
   local r = false
   local endswithret = true
@@ -2946,6 +2941,7 @@ function check_block (env, block)
   endswithret = endswithret and is_exit_point(block)
   check_unused_locals(env)
   tlst.end_scope(env)
+  tlst.pop_variance_barrier(env)
   return r, endswithret, didgoto
 end
 

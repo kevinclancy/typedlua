@@ -28,7 +28,8 @@ function tlst.new_env (subject, filename, strict, genv)
   env.scope = 0
   env.fscope = 0
   env.loop = 0
-  env.variance = 1
+  env.variance = "Invariant"
+  env.variance_barriers = { 1 }
   env["function"] = {}
   env.genv = genv or tlst.new_globalenv()
   return env
@@ -52,8 +53,8 @@ function tlst.typeinfo_Nominal (name, t, tpars, is_class)
 end
 
 -- (type) -> (typeinfo)
-function tlst.typeinfo_Variable (tbound, variance)
-  return { tag = "TIVariable", [1] = tbound, [2] = variance }
+function tlst.typeinfo_Variable (tbound, variance, name)
+  return { tag = "TIVariable", [1] = tbound, [2] = variance, [3] = name }
 end
 
 function tlst.get_all_nominal_edges (env, source, edge_map_out)
@@ -183,6 +184,47 @@ function tlst.set_classtype (env, name, t, is_local)
   else
     env.genv.class_types[name] = t
   end
+end
+
+function tlst.set_variance (env, variance)
+  if not (variance == "Covariant" or variance == "Contravariant" or
+         variance == "Invariant" or variance == "Bivariant") then
+       assert(false)
+  end
+  assert(variance == "Covariant" or variance == "Contravariant" or
+         variance == "Invariant" or variance == "Bivariant")
+  
+  env.variance = variance
+end
+
+function tlst.invert_variance (env)
+  if env.variance == "Covariant" then
+    env.variance = "Contravariant"
+  elseif env.variance == "Contravariant" then
+    env.variance = "Covariant"
+  end
+end
+
+function tlst.is_contravariant (env)
+  return env.variance == "Contravariant" or env.variance == "Bivariant"
+end
+
+function tlst.is_covariant (env)
+  return env.variance == "Covariant" or env.variance == "Bivariant"
+end
+
+function tlst.is_bivariant (env)
+  return env.variance == "Bivariant"
+end
+
+function tlst.push_variance_barrier(env)
+  local barriers = env.variance_barriers
+  barriers[#barriers + 1] = env.scope
+end
+
+function tlst.pop_variance_barrier(env)
+  local barriers = env.variance_barriers
+  barriers[#barriers] = nil
 end
 
 -- new_scope : () -> (senv)
@@ -344,9 +386,20 @@ end
 -- get_typeinfo : (env,string) -> (typeinfo?)
 function tlst.get_typeinfo (env, name)
   local scope = env.scope
+  local barriers = env.variance_barriers
+  local top_barrier = barriers[#barriers]
+  if top_barrier == nil then
+    assert(false)
+  end
   for s = scope, 1, -1 do
-    local t = env[s].types[name]
-    if t then return t end
+    local ti = env[s].types[name]
+    if ti then 
+      if ti.tag == "TIVariable" and s <= top_barrier then
+          return tlst.typeinfo_Variable(ti[1], "Invariant", ti[3])
+      else
+        return ti
+      end
+    end
   end
   return env.genv.types[name]
 end

@@ -1210,8 +1210,8 @@ local function subtype_symbol (assume, env, t1, t1_str, t2, t2_str, relation)
       
   -- handle bounded variables
   if t1_symbol and ti1.tag == "TIVariable" then
-    if ti1 == ti2 then
-      return true
+    if ti2 and ti2.tag == "TIVariable" and ti1[3] == ti2[3] then
+      return true --if names are equal then return true
     elseif ti1[1] ~= "NoBound" then
       return subtype(assume, env, ti1[1], t2, relation)  
     else
