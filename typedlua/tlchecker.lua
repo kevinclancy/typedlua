@@ -1259,7 +1259,8 @@ local function check_call (env, exp)
         
         -- substitute type args into bounds
         for i, tparam in ipairs(tparams) do
-          local tbound = tltype.substitutes(tparam[3], param_names, targs)
+          local tbound = (tparam[3] == "NoBound") and Value or tparam[3]
+          tbound = tltype.substitutes(tbound, param_names, targs)
           table.insert(substituted_bounds, tbound)
         end
            
@@ -2382,8 +2383,10 @@ local function get_class_types (env, def)
   end
   
   local t_premethods = tltype.Table()
-  for _,field in pairs(instance_methods) do 
-    t_premethods[#t_premethods + 1] = premethod_from_method(field,tltype.Symbol(name[1],t_params)) 
+  for _,field in pairs(instance_methods) do
+    local t_param_symbols = {}
+    for i,param in ipairs(t_params) do t_param_symbols[i] = tltype.Symbol(t_params[i][1]) end
+    t_premethods[#t_premethods + 1] = premethod_from_method(field,tltype.Symbol(name[1],t_param_symbols)) 
   end
   
   local t_class = tltype.Table(table.unpack(class_constructors))
