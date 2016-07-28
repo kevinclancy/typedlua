@@ -1040,13 +1040,17 @@ local function check_return_type (env, inf_type, dec_type, pos)
   if tltype.isUnionlist(dec_type) then
     dec_type = tltype.unionlist2tuple(dec_type)
   end
-  if tltype.subtype(env, inf_type, dec_type) then
-  elseif tltype.consistent_subtype(env, inf_type, dec_type) then
-    msg = string.format(msg, tltype.tostring(inf_type), tltype.tostring(dec_type))
-    typeerror(env, "any", msg, pos)
+  local sub_succ, sub_explanation = tltype.subtype(env, inf_type, dec_type)
+  if sub_succ then
   else
-    msg = string.format(msg, tltype.tostring(inf_type), tltype.tostring(dec_type))
-    typeerror(env, "ret", msg, pos)
+    local cs_succ, cs_explanation = tltype.consistent_subtype(env, inf_type, dec_type)
+    if cs_succ then
+      msg = string.format(msg, tltype.tostring(inf_type), tltype.tostring(dec_type))
+      typeerror(env, "any", msg .. "\n" .. sub_explanation, pos)
+    else
+      msg = string.format(msg, tltype.tostring(inf_type), tltype.tostring(dec_type))
+      typeerror(env, "ret", msg .. "\n" .. cs_explanation, pos)
+    end
   end
 end
 
@@ -1475,11 +1479,15 @@ local function check_local_var (env, id, inferred_type, close_local)
     local msg = "attempt to assign '%s' to '%s'"
     local local_type = tltype.unfold(env, local_type)
     msg = string.format(msg, tltype.tostring(inferred_type), tltype.tostring(local_type))
-    if tltype.subtype(env, inferred_type, local_type) then
-    elseif tltype.consistent_subtype(env, inferred_type, local_type) then
-      typeerror(env, "any", msg, pos)
+    local subtype_succ, subtype_expl = tltype.subtype(env, inferred_type, local_type)
+    if subtype_succ then
     else
-      typeerror(env, "local", msg, pos)
+      local cs_succ, cs_expl = tltype.consistent_subtype(env, inferred_type, local_type)
+      if cs_succ then
+        typeerror(env, "any", msg .. "\n" .. subtype_expl, pos)
+      else
+        typeerror(env, "local", msg .. "\n" .. cs_expl, pos)
+      end
     end
   end
   set_type(env, id, local_type)
@@ -1630,13 +1638,17 @@ local function check_assignment (env, varlist, explist)
   table.insert(l, tltype.Vararg(Value))
   local var_type, exp_type = tltype.Tuple(l), explist2typelist(explist)
   local msg = "attempt to assign '%s' to '%s'"
-  if tltype.subtype(env, exp_type, var_type) then
-  elseif tltype.consistent_subtype(env, exp_type, var_type) then
-    msg = string.format(msg, tltype.tostring(exp_type), tltype.tostring(var_type))
-    typeerror(env, "any", msg, varlist[1].pos)
+  local subtype_succ, subtype_expl = tltype.subtype(env, exp_type, var_type) 
+  if subtype_succ then
   else
-    msg = string.format(msg, tltype.tostring(exp_type), tltype.tostring(var_type))
-    typeerror(env, "set", msg, varlist[1].pos)
+    local cs_succ, cs_expl = tltype.consistent_subtype(env, exp_type, var_type) 
+    if cs_succ then
+      msg = string.format(msg, tltype.tostring(exp_type), tltype.tostring(var_type))
+      typeerror(env, "any", msg .. "\n" .. subtype_expl, varlist[1].pos)
+    else
+      msg = string.format(msg, tltype.tostring(exp_type), tltype.tostring(var_type))
+      typeerror(env, "set", msg .. "\n" .. cs_expl, varlist[1].pos)
+    end
   end
   for k, v in ipairs(varlist) do
     local tag = v.tag
@@ -2794,6 +2806,7 @@ function check_var (env, var, exp)
     check_exp(env, exp1)
     check_exp(env, exp2)
     local t1, t2 = tltype.first(get_type(exp1)), tltype.first(get_type(exp2))
+    t1 = tltype.unfold(env, t1)
     local msg = "attempt to index '%s' with '%s'"
     if tltype.isTable(t1) then
       if exp1.tag == "Id" and exp1[1] ~= "_ENV" then env.self = t1 end
