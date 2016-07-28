@@ -1095,6 +1095,16 @@ local function subtype_table (assume, env, t1, t1_str, t2, t2_str, relation)
       local k, l = 0, {}
       for i = 1, m do
         for j = 1, n do
+          local s1, s2 = tltype.tostring(t1[i][1]), tltype.tostring(t2[j][1])
+          if s1 == "1" and s2 == "2" then
+            local a = 5
+            a = 4
+          end
+          if t1[i][1] == 1 and t2[j][1] == 2 then
+            local a = 5
+            a = 4
+          end
+          
           if subtype(assume, env, t1[i][1], t2[j][1], relation) then
             local succ, explanation = subtype(assume, env, t1[i][2], t2[j][2], relation) 
             if succ then
@@ -1134,6 +1144,15 @@ local function subtype_table (assume, env, t1, t1_str, t2, t2_str, relation)
       local k, l = 0, {}
       for i = 1, m do
         for j = 1, n do
+          local s1, s2 = tltype.tostring(t1[i][1]), tltype.tostring(t2[j][1])
+          if s1 == "1" and s2 == "2" then
+            local a = 5
+            a = 4
+          end
+          if t1[i][1] == 1 and t2[j][1] == 2 then
+            local a = 5
+            a = 4
+          end          
           if subtype(assume, env, t1[i][1], t2[j][1], relation) then
             local succ, explanation = subtype_field(assume, env, t2[j], t1[i], relation) 
             if not succ then
@@ -1428,11 +1447,7 @@ local function subtype_tuple (assume, env, t1, t1_str, t2, t2_str, relation)
   assert(false)
 end
 
-function subtype (assume, env, t1, t2, relation)
-  local t1_str, t2_str = tltype.tostring(t1), tltype.tostring(t2)
-  local key =  t1_str .. "@" .. t2_str
-  if assume[key] then return true end
-  assume[key] = true
+function subtype (assume, env, t1, t2, relation, verbose)  
   if relation == "<:" and tltype.isAny(t1) and tltype.isAny(t2) then
     return true
   elseif relation == "<:" and (tltype.isAny(t1) or tltype.isAny(t2)) then
@@ -1443,44 +1458,6 @@ function subtype (assume, env, t1, t2, relation)
     return true
   elseif tltype.isVoid(t1) and tltype.isVoid(t2) then
     return true
-  elseif tltype.isUnionlist(t1) then
-    for k, v in ipairs(t1) do
-      local succ, msg = subtype(assume, env, v, t2, relation)
-      if not succ then
-        local v_str = tltype.tostring(v)
-        return false, string.format("%s is not a subtype of %s", v_str, t2_str) .. "\n" .. msg
-      end
-    end
-    return true
-  elseif tltype.isUnionlist(t2) then
-    local msgs = ""    
-    for k, v in ipairs(t2) do
-      local succ, msg = subtype(assume, env, t1, v, relation) 
-      if succ then
-        return true
-      else
-        msgs = msgs .. "\n " .. msg
-      end
-    end
-    return false, string.format("%s is not a subtype of any element of %s\n", t1_str, t2_str) .. msgs
-  elseif tltype.isUnion(t1) or tltype.isUnion(t2) then
-    return subtype_union(assume, env, t1, t1_str, t2, t2_str, relation)
-  elseif tltype.isTuple(t1) and tltype.isTuple(t2) then
-    return subtype_tuple(assume, env, t1, t1_str, t2, t2_str, relation)
-  elseif tltype.isTuple(t1) and not tltype.isTuple(t2) then
-    return false, string.format("%s is a tuple and %s is not", t1_str, t2_str)
-  elseif not tltype.isTuple(t1) and tltype.isTuple(t2) then
-    return false, string.format("%s is not a tuple, but %s is", t1_str, t2_str)
-  elseif tltype.isVararg(t1) and tltype.isVararg(t2) then
-    local t1_nil = tltype.Union(t1[1], tltype.Nil())
-    local t2_nil = tltype.Union(t2[1], tltype.Nil())
-    return subtype(assume, env, t1_nil, t2_nil, relation)
-  elseif tltype.isVararg(t1) and not tltype.isVararg(t2) then
-    local t1_nil = tltype.Union(t1[1], tltype.Nil())
-    return subtype(assume,env, t1_nil, t2, relation)
-  elseif not tltype.isVararg(t1) and tltype.isVararg(t2) then
-    local t2_nil = tltype.Union(t2[1], tltype.Nil())
-    return subtype(assume,env, t1, t2_nil, relation)
   elseif (tltype.isLiteral(t1) and tltype.isLiteral(t2)) or 
          (tltype.isLiteral(t1) and tltype.isBase(t2)) or 
          (tltype.isBase(t1) and tltype.isLiteral(t2)) then
@@ -1491,15 +1468,84 @@ function subtype (assume, env, t1, t2, relation)
     return true
   elseif tltype.isSelf(t1) and tltype.isSelf(t2) then
     return true
-  elseif tltype.isSelf(t1) or tltype.isSelf(t2) then
-    return false, string.format("%s is not a subtype of %s", t1_str, t2_str)
+  end
+  
+  local t1_str, t2_str = tltype.tostring(t1), tltype.tostring(t2)
+  local key =  t1_str .. "@" .. t2_str
+  if assume[key] then return true end
+  assume[key] = true
+    
+  if tltype.isUnionlist(t1) then
+    for k, v in ipairs(t1) do
+      local succ, msg = subtype(assume, env, v, t2, relation)
+      if not succ then
+        local v_str = tltype.tostring(v)
+        assume[key] = nil
+        return false, string.format("%s is not a subtype of %s", v_str, t2_str) .. "\n" .. msg
+      end
+    end
+    assume[key] = nil
+    return true
+  elseif tltype.isUnionlist(t2) then
+    local msgs = ""    
+    for k, v in ipairs(t2) do
+      local succ, msg = subtype(assume, env, t1, v, relation) 
+      if succ then
+        assume[key] = nil
+        return true
+      else
+        msgs = msgs .. "\n " .. msg
+      end
+    end
+    assume[key] = nil
+    return false, string.format("%s is not a subtype of any element of %s\n", t1_str, t2_str) .. msgs
+  elseif tltype.isUnion(t1) or tltype.isUnion(t2) then
+    local ret,msg = subtype_union(assume, env, t1, t1_str, t2, t2_str, relation)
+    assume[key] = nil
+    return ret, msg
+  elseif tltype.isTuple(t1) and tltype.isTuple(t2) then
+    local ret,msg = subtype_tuple(assume, env, t1, t1_str, t2, t2_str, relation)
+    assume[key] = nil
+    return ret, msg
+  elseif tltype.isVararg(t1) and tltype.isVararg(t2) then
+    local t1_nil = tltype.Union(t1[1], tltype.Nil())
+    local t2_nil = tltype.Union(t2[1], tltype.Nil())
+    local ret,msg = subtype(assume, env, t1_nil, t2_nil, relation)
+    assume[key] = nil
+    return ret,msg
+  elseif tltype.isVararg(t1) and not tltype.isVararg(t2) then
+    local t1_nil = tltype.Union(t1[1], tltype.Nil())
+    local ret,msg = subtype(assume,env, t1_nil, t2, relation)
+    assume[key] = nil
+    return ret, msg
+  elseif not tltype.isVararg(t1) and tltype.isVararg(t2) then
+    local t2_nil = tltype.Union(t2[1], tltype.Nil())
+    local ret,msg = subtype(assume,env, t1, t2_nil, relation)
+    assume[key] = nil
+    return ret, msg
   elseif tltype.isFunction(t1) or tltype.isFunction(t2) then
-    return subtype_function(assume, env, t1, t1_str, t2, t2_str, relation)
+    local ret,msg = subtype_function(assume, env, t1, t1_str, t2, t2_str, relation)
+      assume[key] = nil
+      return ret, msg
   elseif tltype.isSymbol(t1) or tltype.isSymbol(t2) then
-    return subtype_symbol(assume, env, t1, t1_str, t2, t2_str, relation)      
+    local ret,msg = subtype_symbol(assume, env, t1, t1_str, t2, t2_str, relation, verbose)      
+    assume[key] = nil
+    return ret, msg
   elseif tltype.isTable(t1) or tltype.isTable(t2) then
-    return subtype_table(assume, env, t1, t1_str, t2, t2_str, relation)
+    local ret,msg = subtype_table(assume, env, t1, t1_str, t2, t2_str, relation)
+    assume[key] = nil
+    return ret,msg
+  elseif tltype.isSelf(t1) or tltype.isSelf(t2) then
+    assume[key] = nil
+    return false, string.format("%s is not a subtype of %s", t1_str, t2_str)
+  elseif tltype.isTuple(t1) and not tltype.isTuple(t2) then
+    assume[key] = nil
+    return false, string.format("%s is a tuple and %s is not", t1_str, t2_str)
+  elseif not tltype.isTuple(t1) and tltype.isTuple(t2) then
+    assume[key] = nil
+    return false, string.format("%s is not a tuple, but %s is", t1_str, t2_str)
   else
+    assume[key] = nil
     return false, string.format("%s is not a subtype of %s", t1_str, t2_str)
   end
 end
@@ -1643,6 +1689,17 @@ end
 
 -- tostring
 
+local function abbreviate(typename)
+  local rev = string.reverse(typename)
+  local dotpos = string.find(rev, "%.")
+  if dotpos == nil then
+    return typename
+  else
+    local s =  string.sub(rev,1,dotpos-1)
+    return string.reverse(s)
+  end
+end
+
 -- type2str (type) -> (string)
 local function type2str (t, n)
   n = n or 0
@@ -1681,7 +1738,7 @@ local function type2str (t, n)
     end
     return "{" .. table.concat(l, ", ") .. "}"
   elseif tltype.isSymbol(t) then
-    local ret = t[1]
+    local ret = abbreviate(t[1])
     local targs = t[2]
     if #targs > 0 then
       ret = ret .. '<'
