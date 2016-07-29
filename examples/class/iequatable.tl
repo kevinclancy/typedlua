@@ -38,12 +38,12 @@ local function CompareThese< T <: IEq<T> >(x : T, y : T)
 end
 
 local one = class(Number).new(1)
-local two = class(Number).new(2)
+local two = Number.new(2)
 local p = class(Pair).new<Number, Number>(one,two)
-local r = class(Pair).new<Number, Number>(two,two)
+local r = Pair.new<Number, Number>(two,two)
 local nc = class(Noncomp)
 local q = class(Pair).new<Noncomp, Noncomp>(nc.new(), nc.new())
 
 print(p:eq(r))
 print( CompareThese< Pair<Number,Number> >(p, p) ) --this works
-print( CompareThese< Pair<Number,Number> >(q, q) ) --this generates an error
+print( CompareThese< Pair<Noncomp,Noncomp> >(q, q) ) --this generates an error
