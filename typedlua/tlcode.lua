@@ -366,9 +366,23 @@ function code_stm (stm, fmt)
     local ret = ""
     for _,def in ipairs(stm[1]) do
       if def.tag == "Class" then
+        local class_alias = def[1][1]
+        local class_name = "'" .. def[1].global_name .. "'"
+        ret = ret .. "local " .. class_alias .. " "
+      end
+    end
+    for _,def in ipairs(stm[1]) do
+      if def.tag == "Class" then
         ret = ret .. indent(code_class(def,fmt),fmt)
       end
-    end  
+    end
+    for _,def in ipairs(stm[1]) do
+      if def.tag == "Class" then
+        local class_alias = def[1][1]
+        local class_name = "'" .. def[1].global_name .. "'"
+        ret = ret .. " " .. class_alias .. " = (debug.getregistry()).classes[" .. class_name .. "] "
+      end
+    end
     return ret
   elseif tag == "Class" then
     return indent(code_class(stm,fmt), fmt)

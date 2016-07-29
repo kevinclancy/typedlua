@@ -724,6 +724,10 @@ end
 
 local function traverse_typedefs (env, stat)
   for _,def in ipairs(stat[1]) do
+    tlst.set_local(env, def[1])
+  end
+  
+  for _,def in ipairs(stat[1]) do
     local tag = def.tag
     if tag == "Typedef" then
       return traverse_typedef(env,def)

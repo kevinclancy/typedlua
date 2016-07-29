@@ -260,7 +260,6 @@ local function kindcheck_arity (env, t)
   end  
 end
 
-
 --full kindchecking, including arity, definedness, and type bounds on type operator arguments
 local function kindcheck (env, t)
   if type(t) == "boolean" then
@@ -2542,7 +2541,8 @@ local function check_typedefs (env, stm)
           tlst.end_scope(env)
           return false
         end 
-        tlst.end_scope(env) end --check inheritance clause
+        tlst.end_scope(env)  --check inheritance clause
+      end
     end
   end
   
@@ -2573,12 +2573,12 @@ local function check_typedefs (env, stm)
         def[2] = Any
       end
     elseif def.tag == "Class" or def.tag == "Interface" then
-      do tlst.begin_scope(env) -- type parameters for the class definition.
+      tlst.begin_scope(env) -- type parameters for the class definition.
       local elems = def[3] 
       local tpars = (def.tag == "Class" and def[5]) or (def.tag == "Interface" and def[2])
       set_tpars(env, tpars)
       kindcheck_arity_class_elems(env, elems)
-      tlst.end_scope(env) end
+      tlst.end_scope(env)
     end
   end
   
@@ -2595,7 +2595,7 @@ local function check_typedefs (env, stm)
   end
   
   -- replace bundle stubs with full type definitions, so that we can perform bound kindchecking
-  -- and method covariance checking
+  -- and method covariance checking, add class types, instance types, and local class names to environment
   for _,def in ipairs(defs) do
     if def.tag == "Typedef" then
       local name,t = def[1][1],def[2]
@@ -2610,6 +2610,10 @@ local function check_typedefs (env, stm)
       local ti = tlst.typeinfo_Nominal(name, t_instance, tparams, true)
       tlst.set_typeinfo(env, typename, ti, env.scope > 1)
       tlst.set_classtype(env, typename, t_class, env.scope > 1)
+      set_type(env, name, t_class)
+      --NOTE: reassigning this local leads to a confusing (albeit safe) situation, so it would be good
+      --to have const locals in this scenario
+      tlst.set_local(env, name)
     elseif def.tag == "Interface" then
       local name, tparams = def[1], def[2]
       local t_interface = get_interface_type(env, def)
