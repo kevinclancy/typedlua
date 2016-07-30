@@ -2815,80 +2815,86 @@ end
 
 local function check_implements (env, stm)
   local t1, t2 = stm[1], stm[2]
-  
-
-  
   if t1.tag ~= "TSymbol" then
-    local msg = "left-hand side of an implements statement should be a nominal type, possibly applied to one or more variables."
+    local msg = "left hand side of an implements statement should be a nominal type"
     typeerror(env, "implements", msg, t1.pos)
     return
-  else
-    expand_typealias(env, t1)
-    local name, params = t1[1], t1[2]
-    --check that name refers to a nominal type
-    local ti = tlst.get_typeinfo(env, name)
-    if not ti then
-      local msg = string.format("undefined type %s", name)
-      typeerror(env, "implements", msg, t1.pos)
-      return
-    elseif ti.tag ~= "TINominal" then
-      local msg = string.format("%s must be the name of a class or interface", name)
-      typeerror(env, "implements", msg, t1.pos)
-      return
-    end
-    
-    local ti_params = ti[2]
-    
-    if #params ~= #ti_params then
-      local msg = "%s has %d parameters, but written here with %d"
-      msg = string.format(msg, name, #ti_params, #params)
-      typeerror(env, "implements", msg, t1.pos)
-      return
-    end
+  end
+  expand_typealias(env, t1)
+  local name, params = t1[1], t1[2]
+  --check that name refers to a nominal type
+  local ti1 = tlst.get_typeinfo(env, name)
+  if not ti1 then
+    local msg = string.format("undefined type %s", name)
+    typeerror(env, "implements", msg, t1.pos)
+    return
+  elseif ti1.tag ~= "TINominal" then
+    local msg = string.format("%s must be the name of a class or interface", name)
+    typeerror(env, "implements", msg, t1.pos)
+    return
+  end
   
-    local param_position = {}
-    local param_names = {}
-    --check that all arguments are identifiers
-    for i,param in ipairs(params) do
-      if param.tag ~= "TSymbol" then
-        local msg = "expected type variable for %s arg, got %s"
-        msg = string.format(msg, tlutils.order_description(i), tltype.tostring(arg))
-        typeerror(env, "implements", msg, param.pos)
-        return
-      elseif #param[2] > 0 then
-        local msg = "expected type variable for %s arg, got %s"
-        msg = string.format(msg, tlutils.order_description(i), tltype.tostring(arg))
-        typeerror(env, "implements", msg, param.pos)
-        return
-      end
-      
-      local param_name = param[1]
-      param_names[#param_names + 1] = param[1]
-      if param_position[param_name] then
-        local msg = "parameter name %s reused at the %s and %s argument"
-        local s1 = tlutils.order_description(i)
-        local s2 = tlutils.order_description(param_position[param_name])
-        msg = string.format(msg, param_name, s1, s2)
-        typeerror(env, "implements", msg, t1.pos)
-      end
-      param_position[param_name] = i
+  local ti1_params = ti1[2]
+  
+  if #params ~= #ti1_params then
+    local msg = "%s has %d parameters, but written here with %d"
+    msg = string.format(msg, name, #ti1_params, #params)
+    typeerror(env, "implements", msg, t1.pos)
+    return
+  end
+  
+  if t2.tag ~= "TSymbol" then
+    local msg = "right hand side of an implements statement should be a nominal type"
+    typeerror(env, "implements", msg, t2.pos)
+    return    
+  end
+
+  expand_typealias(env, t2)
+
+  local param_position = {}
+  local param_names = {}
+  --check that all arguments are identifiers
+  for i,param in ipairs(params) do
+    if param.tag ~= "TSymbol" then
+      local msg = "expected type variable for %s arg, got %s"
+      msg = string.format(msg, tlutils.order_description(i), tltype.tostring(arg))
+      typeerror(env, "implements", msg, param.pos)
+      return
+    elseif #param[2] > 0 then
+      local msg = "expected type variable for %s arg, got %s"
+      msg = string.format(msg, tlutils.order_description(i), tltype.tostring(arg))
+      typeerror(env, "implements", msg, param.pos)
+      return
     end
     
-    tlst.begin_scope(env) --type parameters
-    
-    --need to rename the ti params to agree with implements params before adding to environment
-    local ti_param_names = {}
-    for _,p in ipairs(ti_params) do
-      ti_param_names[#ti_param_names + 1] = p[2]
+    local param_name = param[1]
+    param_names[#param_names + 1] = param[1]
+    if param_position[param_name] then
+      local msg = "parameter name %s reused at the %s and %s argument"
+      local s1 = tlutils.order_description(i)
+      local s2 = tlutils.order_description(param_position[param_name])
+      msg = string.format(msg, param_name, s1, s2)
+      typeerror(env, "implements", msg, t1.pos)
+      return
+    end
+    param_position[param_name] = i
+  end
+  
+  --kindcheck rhs
+  tlst.begin_scope(env) --type parameters
+    --need to rename the ti1 params to agree with implements params before adding to environment
+    local ti1_param_names = {}
+    for _,p in ipairs(ti1_params) do
+      ti1_param_names[#ti1_param_names + 1] = p[2]
     end
     local renamed_params = {}
     for i=1,#params do
-      local name, variance, bound = ti_params[i][1], ti_params[i][2], ti_params[i][3]
+      local name, variance, bound = ti1_params[i][1], ti1_params[i][2], ti1_params[i][3]
       renamed_params[#renamed_params + 1] = { 
         tag = "TypeParam", 
         [1] = params[i][1], 
         [2] = variance,
-        [3] = tltype.substitutes(bound, ti_param_names, params)
+        [3] = tltype.substitutes(bound, ti1_param_names, params)
       }
     end
     set_tpars(env, renamed_params)
@@ -2897,8 +2903,20 @@ local function check_implements (env, stm)
       tlst.end_scope(env) --type parameters
       return
     end
-    tlst.end_scope(env) --type parameters
+  tlst.end_scope(env) --type parameters
+  
+  --add nominal edge
+  local ti1_symbols = {}
+  for _,p in ipairs(ti1_params) do
+    ti1_symbols[#ti1_symbols + 1] = tltype.Symbol(p[1], {})
   end
+  local param_names = {}
+  for _,p in ipairs(params) do param_names[#param_names + 1] = p[1] end
+  local instantiation = {}
+  for _,t in ipairs(t2[2]) do
+    instantiation[#instantiation + 1] = tltype.substitutes(t, param_names, ti1_symbols)
+  end
+  tlst.add_nominal_edge(env, t1[1], t2[1], instantiation, tltype.substitutes, env.scope > 1)
 end
 
 function check_id (env, exp)

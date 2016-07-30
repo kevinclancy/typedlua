@@ -7,24 +7,9 @@ if not table.unpack then table.unpack = unpack end
 local tltype = {}
 
 local tlst = require "typedlua.tlst"
+local tlutils = require "typedlua.tlutils"
 
 tltype.integer = false
-
-local function order_description(i)
-  local s = tostring(i)
-  local c = s[#s]
-  if c == '0' then
-    return s .. "th"
-  elseif i == 1 then
-    return s .. "st"
-  elseif i == 2 then
-    return s .. "nd"
-  elseif i == 3 then
-    return s .. "rd"
-  else
-    return s .. "th"
-  end
-end
 
 -- literal types
 
@@ -1362,7 +1347,7 @@ local function subtype_tuple (assume, env, t1, t1_str, t2, t2_str, relation)
       local succ, explanation = subtype(assume, env, t1[i], t2[i], relation)
       if not succ then
         local s1,s2 = tltype.tostring(t1[i]), tltype.tostring(t2[i])
-        local ord = order_description(i)
+        local ord = tlutils.order_description(i)
         local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
         local component = string.format("%dth component %s is not a subtype of %s", ord, s1, s2)
         local msg = problem .. "\n" .. component .. "\n" .. explanation
@@ -1376,7 +1361,7 @@ local function subtype_tuple (assume, env, t1, t1_str, t2, t2_str, relation)
       if not succ then
         local s1,s2 = tltype.tostring(t1[i]), tltype.tostring(t2[i])
         local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
-        local ord = order_description(j)
+        local ord = tlutils.order_description(j)
         local component = string.format("\nvararg type %s is not a subtype of %s component %s", s1, ord, s2)
         local msg = problem .. component .. "\n" .. explanation
         return false, msg
@@ -1394,7 +1379,7 @@ local function subtype_tuple (assume, env, t1, t1_str, t2, t2_str, relation)
       local succ, explanation = subtype(assume, env, t1[i], t2[i], relation)
       if not succ then
         local s1,s2 = tltype.tostring(t1[i]), tltype.tostring(t2[i])
-        local ord = order_description(i)
+        local ord = tlutils.order_description(i)
         local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
         local component = string.format("\n%dth component %s is not a subtype of %s", ord, s1, s2)
         local msg = problem .. component .. "\n" .. explanation        
@@ -1407,7 +1392,7 @@ local function subtype_tuple (assume, env, t1, t1_str, t2, t2_str, relation)
       local succ, explanation = subtype(assume, env, t1[j], t2[i], relation)
       if not succ then
         local s1,s2 = tltype.tostring(t1[i]), tltype.tostring(t2[i])
-        local ord = order_description(j)
+        local ord = tlutils.order_description(j)
         local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
         local component = string.format("\n%sth component %s is not a subtype of vararg type %s", ord, s1, s2)
         local msg = problem .. component .. "\n" .. explanation          
@@ -1421,7 +1406,7 @@ local function subtype_tuple (assume, env, t1, t1_str, t2, t2_str, relation)
       local succ, explanation = subtype(assume, env, t1[k], t2[k], relation)  
       if not succ then
         local s1,s2 = tltype.tostring(t1[k]), tltype.tostring(t2[k])
-        local ord = order_description(k)
+        local ord = tlutils.order_description(k)
         local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
         local component = string.format("%s component", ord, s1, s2)
         local msg = problem .. "\n" .. component .. "\n" .. explanation        
