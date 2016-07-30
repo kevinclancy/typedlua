@@ -1,5 +1,25 @@
 
 
+local function BadFunction(a,b,c)
+  class TestClass
+    method Speak() : any
+      print("woof")
+    end
+    
+    method clone() : TestClass
+      local x = class(TestClass).new()
+      x:Speak()
+      return x
+    end
+    
+    constructor new()
+    end
+  end
+  
+  return TestClass.new() -- this should generate an error
+end
+
+
 local function DogFunction(a,b,c)
   class TestClass
     method Speak() : any
