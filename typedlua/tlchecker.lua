@@ -63,10 +63,6 @@ local function current_modname (env)
 end
 
 local function make_typename (env, ident, is_local)
-  if not is_local then
-    assert(false)
-  end
-  
   local ret = current_modname(env) .. ident[1]
   if is_local then
     ret = ret .. "(" .. ident.l .. ", " .. ident.c .. ")"
@@ -1584,9 +1580,12 @@ local function check_localrec (env, id, exp)
   if not r then tlst.set_return_type(env, tltype.Tuple({ Nil }, true)) end
   check_unused_locals(env)
   tlst.end_scope(env) -- function scope
-  tlst.end_scope(env) -- type parameters
+  
   local inferred_type = infer_return_type(env)
   kindcheck(env, inferred_type)
+  
+  tlst.end_scope(env) -- type parameters
+
   if infer_return then
     ret_type = inferred_type
     t = tltype.Function(tpars, input_type, ret_type)
