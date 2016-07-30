@@ -62,6 +62,18 @@ local function current_modname (env)
   return filename_to_modulename(env.filename)
 end
 
+local function make_typename (env, ident, is_local)
+  if not is_local then
+    assert(false)
+  end
+  
+  local ret = current_modname(env) .. ident[1]
+  if is_local then
+    ret = ret .. "(" .. ident.l .. ", " .. ident.c .. ")"
+  end
+  return ret
+end
+
 local function expand_typealias(env, t)
   assert(t.tag == "TSymbol")
   local name = t[1]
@@ -1574,6 +1586,7 @@ local function check_localrec (env, id, exp)
   tlst.end_scope(env) -- function scope
   tlst.end_scope(env) -- type parameters
   local inferred_type = infer_return_type(env)
+  kindcheck(env, inferred_type)
   if infer_return then
     ret_type = inferred_type
     t = tltype.Function(tpars, input_type, ret_type)
@@ -2356,7 +2369,7 @@ local function get_interface_type (env, def)
   return t_interface
 end
 
-local function get_class_types (env, def)
+local function get_class_types (env, def, is_local)
   local name, isAbstract, elems, superclass = def[1], def[2], def[3], def[4]
   local t_params, superargs = def[5], def[6]
   local constructors, methods, members = get_elem_types(env, elems)
@@ -2411,7 +2424,7 @@ local function get_class_types (env, def)
   for _,v in ipairs(t_params) do
     table.insert(param_symbols, tltype.Symbol(v[1]))
   end
-  local t_class_symbol = tltype.Symbol(current_modname(env)..name[1], param_symbols)
+  local t_class_symbol = tltype.Symbol(make_typename(env, name, is_local), param_symbols)
   
   --create constructor types, which are functions whose type parameters mirror those of the class,
   --and which return t_class_symbol
@@ -2496,19 +2509,20 @@ end
 local function check_typedefs (env, stm)
   assert(stm.tag == "TypeBundle")
   local defs = stm[1]
+  local is_local = env.scope > 1
   
   local bundle_typenames = {}
   --collect typenames and check for duplicates
   for _,def in ipairs(defs) do
     local name = def[1][1]
-    name = current_modname(env) .. name
-    if tlst.get_typeinfo(env, name) or bundle_typenames[name] then
+    local typename = make_typename(env, def[1], is_local)
+    if tlst.get_typeinfo(env, typename) or bundle_typenames[typename] then
       local msg = "attempt to redeclare type '%s'"
-      msg = string.format(msg, name)
+      msg = string.format(msg, typename)
       typeerror(env, "alias", msg, def.pos)
       return false
     else
-      bundle_typenames[name] = true
+      bundle_typenames[typename] = true
     end
   end
   
@@ -2550,17 +2564,17 @@ local function check_typedefs (env, stm)
   for _,def in ipairs(defs) do
     if def.tag == "Typedef" then
       local name = def[1][1]
-      local typename = current_modname(env) .. name
+      local typename = make_typename(env, def[1], is_local)
       local ti = tlst.typeinfo_Structural(Any)
-      tlst.set_typeinfo(env, typename, ti, env.scope > 1)
+      tlst.set_typeinfo(env, typename, ti, is_local)
       tlst.set_typealias(env, name, typename)
     elseif def.tag == "Class" or def.tag == "Interface" then
       local name = def[1]
       local tparams = def.tag == "Class" and def[5] or def[2]
-      local ti = tlst.typeinfo_Nominal(name, Any, tparams, true)
-      local typename = current_modname(env) .. name[1]
+      local typename = make_typename(env, name, is_local)      
+      local ti = tlst.typeinfo_Nominal(typename, Any, tparams, true)
       name.global_name = typename
-      tlst.set_typeinfo(env, typename, ti, env.scope > 1)
+      tlst.set_typeinfo(env, typename, ti, is_local)
       tlst.set_typealias(env, name[1], typename)
     end
   end
@@ -2586,10 +2600,10 @@ local function check_typedefs (env, stm)
   for _,def in ipairs(defs) do
     if def.tag == "Class" then
       local name, tsuper = def[1], def[4]
-      local typename = current_modname(env) .. def[1][1]
+      local typename = make_typename(env, name, is_local)
       --tlst.add_nominal_edge(env, typename, typename, , tltype.substitutes, env.scope > 1)
       if tsuper ~= "NoParent" then
-        tlst.add_nominal_edge(env, typename, tsuper[1], tsuper[2], tltype.substitutes, env.scope > 1)
+        tlst.add_nominal_edge(env, typename, tsuper[1], tsuper[2], tltype.substitutes, is_local)
       end
     end
   end
@@ -2598,18 +2612,17 @@ local function check_typedefs (env, stm)
   -- and method covariance checking, add class types, instance types, and local class names to environment
   for _,def in ipairs(defs) do
     if def.tag == "Typedef" then
-      local name,t = def[1][1],def[2]
-      local typename = current_modname(env) .. name
+      local name,t = def[1],def[2]
+      local typename = make_typename(env, name, is_local)
       local ti = tlst.typeinfo_Structural(t)
       tlst.set_typeinfo(env, typename, ti, env.scope > 1)
     elseif def.tag == "Class" then
       local name, tparams = def[1], def[5]
-      local typealias = name[1]
-      local typename = current_modname(env) .. typealias      
-      local t_instance, t_class, instance_members, superclass_members = get_class_types(env, def)
-      local ti = tlst.typeinfo_Nominal(name, t_instance, tparams, true)
-      tlst.set_typeinfo(env, typename, ti, env.scope > 1)
-      tlst.set_classtype(env, typename, t_class, env.scope > 1)
+      local typename = make_typename(env, name, is_local)
+      local t_instance, t_class, instance_members, superclass_members = get_class_types(env, def, is_local)
+      local ti = tlst.typeinfo_Nominal(typename, t_instance, tparams, true)
+      tlst.set_typeinfo(env, typename, ti, is_local)
+      tlst.set_classtype(env, typename, t_class, is_local)
       set_type(env, name, t_class)
       --NOTE: reassigning this local leads to a confusing (albeit safe) situation, so it would be good
       --to have const locals in this scenario
@@ -2617,10 +2630,9 @@ local function check_typedefs (env, stm)
     elseif def.tag == "Interface" then
       local name, tparams = def[1], def[2]
       local t_interface = get_interface_type(env, def)
-      local typealias = name[1]
-      local typename = current_modname(env) .. typealias      
-      local ti = tlst.typeinfo_Nominal(name, t_interface, tparams, true)
-      tlst.set_typeinfo(env, typename, ti, env.scope > 1)
+      local typename = make_typename(env, name, is_local)
+      local ti = tlst.typeinfo_Nominal(typename, t_interface, tparams, true)
+      tlst.set_typeinfo(env, typename, ti, is_local)
     end
   end
     
@@ -2741,27 +2753,27 @@ local function check_typedefs (env, stm)
   for _,def in ipairs(defs) do
     if def.tag == "Class" then
       local name, tpars, interfaces = def[1], def[5], def[6]
-      local typename = current_modname(env) .. name[1]
-      do tlst.begin_scope(env) --class type parameters
+      local typename = make_typename(env, name, is_local)
+      tlst.begin_scope(env) --class type parameters
       set_tpars(env, tpars)
-      local t_instance,_,_,_ = get_class_types(env, def)
+      local t_instance,_,_,_ = get_class_types(env, def, is_local)
       for i,t in ipairs(interfaces) do
         assert(t.tag == "TSymbol")
         local succ, explanation = tltype.consistent_subtype(env, t_instance, tltype.unfold(env, t))
         if succ then
           env.scope = env.scope - 1 --add nominal edge to the scope above this class's scope
-          tlst.add_nominal_edge(env, typename, t[1], t[2], tltype.substitutes, env.scope > 1)
+          tlst.add_nominal_edge(env, typename, t[1], t[2], tltype.substitutes, is_local)
           env.scope = env.scope + 1
         else
           local par_tsymbols = {}
           for i,v in ipairs(tpars) do par_tsymbols[i] = tltype.Symbol(v[1]) end
-          local def_tsymbol = tltype.Symbol(current_modname(env) .. name[1], par_tsymbols)
+          local def_tsymbol = tltype.Symbol(env, make_typename(name, is_local), par_tsymbols)
           local msg = "%s is not a subtype of %s"
           msg = string.format(msg, tltype.tostring(def_tsymbol), tltype.tostring(t))
           typeerror(env, "inheritance", msg .. "\n" .. explanation, t.pos)
         end
       end
-      tlst.end_scope(env) end -- class type parameters
+      tlst.end_scope(env) -- class type parameters
     end
   end
   
@@ -2777,7 +2789,7 @@ local function check_typedefs (env, stm)
         local ti = tlst.typeinfo_Variable(tbound, variance, name)
         tlst.set_typeinfo(env, name, ti, true)
       end
-      local t_instance, t_class, instance_members, superclass_members = get_class_types(env, def)
+      local t_instance, t_class, instance_members, superclass_members = get_class_types(env, def, is_local)
       check_class_code(env, elems, t_instance, instance_members, superclass_members, tsuper)
       tlst.end_scope(env) -- class type parameters
     end
