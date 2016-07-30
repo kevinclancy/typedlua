@@ -269,10 +269,8 @@ local function kindcheck_arity (env, t)
 end
 
 --full kindchecking, including arity, definedness, and type bounds on type operator arguments
-local function kindcheck (env, t)
-  if type(t) == "boolean" then
-    assert(false)
-  end
+-- (env, type, context?) -> (boolean)
+local function kindcheck (env, t, context)
   if t.tag == "TLiteral" then
     return true
   elseif t.tag == "TBase" then
@@ -289,26 +287,26 @@ local function kindcheck (env, t)
     return true
   elseif t.tag == "TUnion" then
     for i,elem in ipairs(t) do
-      if not kindcheck(env, elem) then
+      if not kindcheck(env, elem, context) then
         t[i] = Any
       end
     end
     return true
   elseif t.tag == "TVarArg" then
-    if not kindcheck(env, t[1]) then
+    if not kindcheck(env, t[1], context) then
       t[1] = Any
     end
     return true
   elseif t.tag == "TTuple" then
     for i,elem in ipairs(t) do
-      if not kindcheck(env,elem) then
+      if not kindcheck(env, elem, context) then
         t[i] = Any
       end
     end
     return true
   elseif t.tag == "TUnionList" then
     for i,elem in ipairs(t) do
-      if not kindcheck(env,elem) then
+      if not kindcheck(env, elem, context) then
         t[i] = Any
       end
     end
@@ -325,33 +323,33 @@ local function kindcheck (env, t)
     end
     for i,tpar in ipairs(t[3]) do
       local tbound = tpar[3]
-      if not kindcheck(env, tbound) then
+      if not kindcheck(env, tbound, context) then
         tpar[3] = Any
       end
     end  
-    if not kindcheck(env, t[1]) then
+    if not kindcheck(env, t[1], context) then
       t[1] = Any
     end
     tlst.invert_variance(env)
-    if not kindcheck(env, t[2]) then
+    if not kindcheck(env, t[2], context) then
       t[2] = Any
     end
     tlst.end_scope(env)
     return true
   elseif t.tag == "TField" then
     tlst.invert_variance(env)
-    if not kindcheck(env,t[1]) then
+    if not kindcheck(env, t[1], context) then
       t[1] = Any
     end
     tlst.invert_variance(env)
     if tltype.isConstField(t) then
-      if not kindcheck(env,t[2]) then
+      if not kindcheck(env, t[2], context) then
         t[2] = Any
       end
     else
       local orig_variance = env.variance
       tlst.set_variance(env, "Invariant")
-      if not kindcheck(env,t[2]) then
+      if not kindcheck(env, t[2], context) then
         t[2] = Any
       end
       env.variance = orig_variance      
@@ -359,7 +357,7 @@ local function kindcheck (env, t)
     return true
   elseif t.tag == "TTable" then
     for i,field in ipairs(t) do
-      if not kindcheck(env,field) then
+      if not kindcheck(env, field, context) then
         t[i] = Any
       end
     end
@@ -370,9 +368,20 @@ local function kindcheck (env, t)
     local args = t[2]
     local ti = tlst.get_typeinfo(env, name)
     if not ti then
-      local msg = string.format("Undeclared type %s", name)
-      typeerror(env, "kind", msg, t.pos)
-      return false
+      if context then
+        if context.tag == "InferredReturnType" then
+          local msg = "locally-scoped type %s occurs in inferred return type %s"
+          msg = string.format(msg, name, tltype.tostring(context.t))
+          typeerror(env, "kind", msg, context.pos)
+          return false
+        else
+          error("unknown kindchecking context")
+        end
+      else
+        local msg = string.format("Undeclared type %s", name)
+        typeerror(env, "kind", msg, t.pos)
+        return false
+      end
     else
       if ti.tag == "TINominal" then
         local tpars = ti[2]
@@ -390,19 +399,19 @@ local function kindcheck (env, t)
           for i,tpar in ipairs(tpars) do
             local variance = tpar[2]
             if variance == "Covariant" then
-              if not kindcheck(env,args[i]) then
+              if not kindcheck(env, args[i], context) then
                 args[i] = Any
               end
             elseif variance == "Contravariant" then
               tlst.invert_variance(env)
-              if not kindcheck(env, args[i]) then
+              if not kindcheck(env, args[i], context) then
                 args[i] = Any
               end
               tlst.invert_variance(env)
             elseif variance == "Invariant" then
               local orig_variance = env.variance
               tlst.set_variance(env, "Invariant")
-              if not kindcheck(env,args[i]) then
+              if not kindcheck(env, args[i], context) then
                 args[i] = Any
               end
               env.variance = orig_variance
@@ -451,7 +460,7 @@ local function kindcheck (env, t)
       end
     end
   elseif t.tag == "TVararg" then
-    if not kindcheck(env, t[1]) then
+    if not kindcheck(env, t[1], context) then
       t[1] = Any
     end
     return true
@@ -1582,7 +1591,12 @@ local function check_localrec (env, id, exp)
   tlst.end_scope(env) -- function scope
   
   local inferred_type = infer_return_type(env)
-  kindcheck(env, inferred_type)
+  local kindcheck_context = {
+    tag = "InferredReturnType",
+    pos = exp.pos,
+    t = inferred_type
+  }
+  kindcheck(env, inferred_type, kindcheck_context)
   
   tlst.end_scope(env) -- type parameters
 
