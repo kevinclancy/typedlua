@@ -192,8 +192,8 @@ local G = lpeg.P { "TypedLua";
                      lpeg.Ct(lpeg.V("InterfaceElement")^0) *
                      tllexer.kw("end") / tlast.statInterface;
                      
-                      
-                     
+  ImplementsStat = lpeg.Cp() * lpeg.V("Type") * 
+                   tllexer.kw("implements") * lpeg.V("Type") / tlast.statImplements;
   
   -- parser
   Chunk = lpeg.V("Block");
@@ -349,7 +349,7 @@ local G = lpeg.P { "TypedLua";
   Stat = lpeg.V("IfStat") + lpeg.V("WhileStat") + lpeg.V("DoStat") + lpeg.V("ForStat") +
          lpeg.V("RepeatStat") + lpeg.V("FuncStat") + lpeg.V("LocalStat") +
          lpeg.V("LabelStat") + lpeg.V("BreakStat") + lpeg.V("GoToStat") +
-         lpeg.V("TypeBundle") + lpeg.V("ExprStat");
+         lpeg.V("TypeBundle") + lpeg.V("ImplementsStat") + lpeg.V("ExprStat");
 }
 
 local traverse_stm, traverse_exp, traverse_var
@@ -722,6 +722,10 @@ local function traverse_typedef (env, def)
   return true
 end
 
+local function traverse_implements (env, def)
+  return true
+end
+
 local function traverse_typedefs (env, stat)
   for _,def in ipairs(stat[1]) do
     tlst.set_local(env, def[1])
@@ -776,7 +780,9 @@ function traverse_stm (env, stm)
   elseif tag == "Invoke" then
     return traverse_invoke(env, stm)
   elseif tag == "TypeBundle" then
-    return traverse_typedefs(env,stm)
+    return traverse_typedefs(env, stm)
+  elseif tag == "Implements" then
+    return traverse_implements(env, stm)
   else
     error("trying to traverse a statement, but got a " .. tag)
   end

@@ -386,6 +386,8 @@ function code_stm (stm, fmt)
     return ret
   elseif tag == "Class" then
     return indent(code_class(stm,fmt), fmt)
+  elseif tag == "Implements" then
+    return ""
   else
     error("trying to generate code for a statement, but got " .. tag)
   end

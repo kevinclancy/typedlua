@@ -217,6 +217,10 @@ function tlast.statTypedef (pos, name, t)
   return { tag = "Typedef", pos = pos, [1] = name, [2] = t }
 end
 
+function tlast.statImplements (pos, t1, t2)
+  return { tag = "Implements", pos = pos, [1] = t1, [2] = t2 }
+end
+
 --statClass : (number, boolean, string, {tpar}|"NoParams", class|"NoParent", {Type}|"NoArgs", class_element_array, ident) -> (stat)
 function tlast.statClass (pos, isAbstract, name, tpars, tsuper, interfaces, elems)
   return { tag = "Class", pos = pos, [1] = name, [2] = isAbstract, 
@@ -289,7 +293,8 @@ end
 
 -- tpar : (number, string, string, type?) -> (tpar)
 function tlast.tpar (pos, variance, str, tbound)
-  return { tag = "TypeParam", pos = pos, [1] = str, [2] = variance, [3] = tbound or "NoBound" }
+  local valueType = { tag = "TValue", name = "value" }
+  return { tag = "TypeParam", pos = pos, [1] = str, [2] = variance, [3] = tbound or valueType }
 end
 
 -- fieldlist
