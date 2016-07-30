@@ -79,9 +79,6 @@ end
 
 -- isLiteral : (type) -> (boolean)
 function tltype.isLiteral (t)
-  if not t then
-    assert(false)
-  end
   return t.tag == "TLiteral"
 end
 
@@ -318,10 +315,6 @@ function tltype.PUnion (pos, ...)
 end
 
 function tltype.simplifyUnion (env, t)
-  if t == nil then
-    assert(false)
-  end
-  
   if t.tag == "TUnion" then
     local l1 = t
     -- remove unions of unions
@@ -1027,9 +1020,6 @@ local function subtype_field (assume, env, f1, f2, relation)
       local problem = "%s is not a subtype of %s"
       local f1_str, f2_str = tltype.tostring(f1), tltype.tostring(f2)
       problem = string.format(problem, f1_str, f2_str)
-      if explanation == nil then
-        assert(false)
-      end
       return false, problem .. "\n" .. explanation
     end
     
@@ -1236,10 +1226,6 @@ local function subtype_symbol (assume, env, t1, t1_str, t2, t2_str, relation)
     else
       return false, problem
     end
-  end
-  
-  if t2_symbol and not ti2 then
-    assert(false)
   end
   
   if t2_symbol and ti2.tag == "TIVariable" then
