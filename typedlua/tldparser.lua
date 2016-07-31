@@ -17,10 +17,11 @@ local G = lpeg.P { "TypedLuaDescription";
                         tllexer.report_error();
   -- type language
   Type = lpeg.V("NilableType");
-  NilableType = lpeg.V("UnionType") * (tllexer.symb("?") * lpeg.Cc(true))^-1 /
-                tltype.UnionNil;
-  UnionType = lpeg.V("PrimaryType") * (lpeg.Cg(tllexer.symb("|") * lpeg.V("PrimaryType"))^0) /
-              tltype.Union;
+  NilableType = lpeg.Cp() * lpeg.V("UnionType") * (tllexer.symb("?") * lpeg.Cc(true))^-1 /
+                tltype.PUnionNil;
+  UnionType = lpeg.Cp() * lpeg.V("PrimaryType") * 
+              (lpeg.Cg(tllexer.symb("|") * lpeg.V("PrimaryType"))^0) /
+              tltype.PUnion;
   PrimaryType = lpeg.V("LiteralType") +
                 lpeg.V("BaseType") +
                 lpeg.V("NilType") +
@@ -30,40 +31,40 @@ local G = lpeg.P { "TypedLuaDescription";
                 lpeg.V("FunctionType") +
                 lpeg.V("TableType") +
                 lpeg.V("VariableType");
-  LiteralType = ((tllexer.token("false", "Type") * lpeg.Cc(false)) +
+  LiteralType = lpeg.Cp() * 
+                ((tllexer.token("false", "Type") * lpeg.Cc(false)) +
                 (tllexer.token("true", "Type") * lpeg.Cc(true)) +
                 tllexer.token(tllexer.Number, "Type") +
                 tllexer.token(tllexer.String, "Type")) /
-                tltype.Literal;
-  BaseType = tllexer.token("boolean", "Type") / tltype.Boolean +
-             tllexer.token("number", "Type") / tltype.Number +
-             tllexer.token("string", "Type") / tltype.String +
-             tllexer.token("integer", "Type") * lpeg.Carg(3) / tltype.Integer;
-  NilType = tllexer.token("nil", "Type") / tltype.Nil;
-  ValueType = tllexer.token("value", "Type") / tltype.Value;
-  AnyType = tllexer.token("any", "Type") / tltype.Any;
-  SelfType = tllexer.token("self", "Type") / tltype.Self;
-  FunctionType = lpeg.Cc({}) * 
-                 lpeg.V("InputType") * 
-                 tllexer.symb("->") * 
-                 lpeg.V("NilableTuple") / tltype.Function;
-  MethodType = lpeg.V("InputType") * tllexer.symb("=>") * lpeg.V("NilableTuple") *
-               lpeg.Cc(true) / tltype.Function;
-  InputType = tllexer.symb("(") * (lpeg.V("TupleType") + lpeg.Cc(nil)) * tllexer.symb(")") *
-              lpeg.Carg(2) /
-              tltype.inputTuple;
-  NilableTuple = lpeg.V("UnionlistType") * (tllexer.symb("?") * lpeg.Carg(2))^-1 /
-                 tltype.UnionlistNil;
-  UnionlistType = lpeg.V("OutputType") * (lpeg.Cg(tllexer.symb("|") * lpeg.V("OutputType"))^0) /
-                  tltype.Unionlist;
-  OutputType = tllexer.symb("(") * (lpeg.V("TupleType") + lpeg.Cc(nil)) * tllexer.symb(")") *
-               lpeg.Carg(2) /
-               tltype.outputTuple;
-  TupleType = lpeg.Ct(lpeg.V("Type") * (tllexer.symb(",") * lpeg.V("Type"))^0) *
+                tltype.PLiteral;
+  BaseType = lpeg.Cp() * tllexer.token("boolean", "Type") / tltype.PBoolean +
+             lpeg.Cp() * tllexer.token("number", "Type") / tltype.PNumber +
+             lpeg.Cp() * tllexer.token("string", "Type") / tltype.PString +
+             lpeg.Cp() * tllexer.token("integer", "Type") * lpeg.Carg(3) / tltype.PInteger;
+  NilType = lpeg.Cp() * tllexer.token("nil", "Type") / tltype.PNil;
+  ValueType = lpeg.Cp() * tllexer.token("value", "Type") / tltype.PValue;
+  AnyType = lpeg.Cp() * tllexer.token("any", "Type") / tltype.PAny;
+  SelfType = lpeg.Cp() * tllexer.token("self", "Type") / tltype.PSelf;
+  FunctionType = lpeg.Cp() * (lpeg.V("InvTypeParams") + lpeg.Cc({})) * lpeg.V("InputType") * tllexer.symb("->") * lpeg.V("NilableTuple") /
+                 tltype.PFunction;
+  MethodType = lpeg.Cp() * lpeg.Cc({}) * lpeg.V("InputType") * tllexer.symb("=>") * 
+               lpeg.V("NilableTuple") * lpeg.Cc(true) / 
+               tltype.PFunction;
+  InputType = lpeg.Cp() * tllexer.symb("(") * (lpeg.V("TupleType") + lpeg.Cc(nil)) * 
+              tllexer.symb(")") * lpeg.Carg(2) /
+              tltype.PinputTuple;
+  NilableTuple = lpeg.Cp() * lpeg.V("UnionlistType") * (tllexer.symb("?") * lpeg.Carg(2))^-1 /
+                 tltype.PUnionlistNil;
+  UnionlistType = lpeg.Cp() * lpeg.V("OutputType") * (lpeg.Cg(tllexer.symb("|") * 
+                  lpeg.V("OutputType"))^0) / tltype.PUnionlist;
+  OutputType = lpeg.Cp() * tllexer.symb("(") * (lpeg.V("TupleType") + 
+               lpeg.Cc(nil)) * tllexer.symb(")") * lpeg.Carg(2) / tltype.PoutputTuple;
+  TupleType = lpeg.Cp() * lpeg.Ct(lpeg.V("Type") * (tllexer.symb(",") * lpeg.V("Type"))^0) *
               (tllexer.symb("*") * lpeg.Cc(true))^-1 /
-              tltype.Tuple;
-  TableType = tllexer.symb("{") * lpeg.V("TableTypeBody") * tllexer.symb(",")^-1 * tllexer.symb("}") /
-              tltype.Table;
+              tltype.PTuple;
+  TableType = lpeg.Cp() * tllexer.symb("{") * 
+              lpeg.V("TableTypeBody") * tllexer.symb(",")^-1 * tllexer.symb("}") /
+              tltype.PTable;
   TableTypeBody = lpeg.V("RecordType") +
                   lpeg.V("HashType") +
                   lpeg.V("ArrayType") +
@@ -73,14 +74,34 @@ local G = lpeg.P { "TypedLuaDescription";
   RecordField = ((tllexer.kw("const") * lpeg.Cc(true)) + lpeg.Cc(false)) *
                 lpeg.V("LiteralType") * tllexer.symb(":") * lpeg.V("Type") /
                 tltype.Field;
-  HashType = lpeg.Cc(false) * lpeg.V("KeyType") * tllexer.symb(":") * lpeg.V("FieldType") /
-             tltype.Field;
+  HashType = lpeg.Cc(false) * lpeg.V("KeyType") * 
+             tllexer.symb(":") * lpeg.V("FieldType") / tltype.Field;
   ArrayType = lpeg.Carg(3) * lpeg.V("FieldType") / tltype.ArrayField;
   KeyType = lpeg.V("BaseType") + lpeg.V("ValueType") + lpeg.V("AnyType");
-  FieldType = lpeg.V("Type") * lpeg.Cc(tltype.Nil()) / tltype.Union;
-  VariableType = tllexer.token(tllexer.Name, "Type") / tltype.Symbol;
-  RetType = lpeg.V("NilableTuple") +
-            lpeg.V("Type") * lpeg.Carg(2) / tltype.retType;
+  FieldType = lpeg.Cp() * lpeg.V("Type") * lpeg.Cc(tltype.Nil()) / tltype.PUnion;
+  VariableType = lpeg.Cp() * tllexer.token(tllexer.Name, "Type") / tltype.PSymbol;
+  RetType = lpeg.Cp() * lpeg.V("NilableTuple") +
+            lpeg.V("Type") * lpeg.Carg(2) / tltype.PretType;
+            
+  TypeVariance = (tllexer.symb("+") * lpeg.Cc("Covariant")) +
+                 (tllexer.symb("-") * lpeg.Cc("Contravariant")) +
+                 lpeg.Cc("Invariant");
+                 
+  TypeParam = lpeg.Cp() * lpeg.V("TypeVariance") * tllexer.token(tllexer.Name, "Name") * 
+              (tllexer.symb("<:") * lpeg.V("Type"))^-1 / tlast.tpar;  
+  
+  InvTypeParam = lpeg.Cp() * lpeg.Cc("Invariant") * tllexer.token(tllexer.Name, "Name") *
+                 (tllexer.symb("<:") * lpeg.V("Type"))^-1 / tlast.tpar;
+  
+  TypeParams = tllexer.symb("<") * 
+               lpeg.Ct( lpeg.V("TypeParam") * (tllexer.symb(",") * lpeg.V("TypeParam"))^0 ) * 
+               tllexer.symb(">");
+                  
+  InvTypeParams = tllexer.symb("<") * 
+                  lpeg.Ct( lpeg.V("InvTypeParam") * (tllexer.symb(",") * lpeg.V("InvTypeParam"))^0 ) * 
+                  tllexer.symb(">");
+                  
+                  
   Id = lpeg.Cp() * tllexer.token(tllexer.Name, "Name") / tlast.ident;
   TypeDecId = (tllexer.kw("const") * lpeg.V("Id") / tlast.setConst) +
               lpeg.V("Id");
@@ -90,16 +111,31 @@ local G = lpeg.P { "TypedLuaDescription";
           (lpeg.V("Type") + lpeg.V("MethodType")) / tltype.fieldlist;
   IdDecList = (lpeg.V("IdDec")^1 + lpeg.Cc(nil)) / tltype.Table;
   TypeDec = tllexer.token(tllexer.Name, "Name") * lpeg.V("IdDecList") * tllexer.kw("end");
-  Interface = lpeg.Cp() * tllexer.kw("interface") * lpeg.V("TypeDec") /
-              tlast.statInterface +
-              lpeg.Cp() * tllexer.kw("typealias") *
-              tllexer.token(tllexer.Name, "Name") * tllexer.symb("=") * lpeg.V("Type") /
-              tlast.statInterface;
+  StructuralTypedef = lpeg.Cp() * tllexer.kw("typedef") * lpeg.V("TypeDec") /
+                      tlast.statInterface +
+                      lpeg.Cp() * tllexer.kw("typedef") *
+                      tllexer.token(tllexer.Name, "Name") * tllexer.symb("=") * lpeg.V("Type") /
+                      tlast.statInterface;
+                      
+  InterfaceDefStat = lpeg.Cp() * tllexer.kw("interface") * lpeg.V("Id") *
+                     (lpeg.V("TypeParams") + lpeg.Cc({})) *
+                     lpeg.Ct(lpeg.V("InterfaceElement")^0) *
+                     tllexer.kw("end") / tlast.statInterface;
+                     
+  InterfaceElement = lpeg.Cp() * tllexer.kw("method") * lpeg.V("Id") * 
+                     tllexer.symb(":") * lpeg.V("MethodType") /
+                     tlast.classElementAbstractMethod;      
+                     
+  TypeBundle = lpeg.Ct(lpeg.V("TypeDefinition") * 
+               (tllexer.kw("and") * lpeg.V("TypeDefinition"))^0) / tlast.statTypeBundle;
+                       
+  TypeDefinition = lpeg.V("StructuralTypedef") + lpeg.V("InterfaceDefStat");
+  
   -- parser
   Userdata = lpeg.Cp() * tllexer.kw("userdata") * lpeg.V("TypeDec") /
              tlast.statUserdata;
   DescriptionList = lpeg.V("DescriptionItem")^1 / function (...) return {...} end;
-  DescriptionItem = lpeg.V("TypedId") + lpeg.V("Interface") + lpeg.V("Userdata");
+  DescriptionItem = lpeg.V("TypedId") + lpeg.V("TypeBundle") + lpeg.V("Userdata");
   TypedId = lpeg.Cp() * tllexer.token(tllexer.Name, "Name") *
             tllexer.symb(":") * lpeg.V("Type") / tlast.ident;
 }
