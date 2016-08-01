@@ -94,7 +94,12 @@ end
 
 --kindchecks for proper arity, and also that all symbols are defined
 --does *not* check subtyping restrictions on type operator arguments
-local function kindcheck_arity (env, t)
+--t : type - the type to kindcheck
+--bundle_typenames : {string => boolean} - a set of mutually recursive 
+--  typenames that might have been mistakenly referenced
+--context_desc : string - a description of the type's context: 
+--  "inheritance clause", "type parameter bound", etc. 
+local function kindcheck_arity (env, t, context)
   if type(t) == "boolean" then
     assert(false)
   end
@@ -114,26 +119,26 @@ local function kindcheck_arity (env, t)
     return true
   elseif t.tag == "TUnion" then
     for i,elem in ipairs(t) do
-      if not kindcheck_arity(env, elem) then
+      if not kindcheck_arity(env, elem, context) then
         t[i] = Any
       end
     end
     return true
   elseif t.tag == "TVarArg" then
-    if not kindcheck_arity(env, t[1]) then
+    if not kindcheck_arity(env, t[1], context) then
       t[1] = Any
     end
     return true
   elseif t.tag == "TTuple" then
     for i,elem in ipairs(t) do
-      if not kindcheck_arity(env,elem) then
+      if not kindcheck_arity(env, elem, context) then
         t[i] = Any
       end
     end
     return true
-  elseif t.tag == "TUnionList" then
+  elseif t.tag == "TUnionlist" then
     for i,elem in ipairs(t) do
-      if not kindcheck_arity(env,elem) then
+      if not kindcheck_arity(env, elem, context) then
         t[i] = Any
       end
     end
@@ -150,33 +155,33 @@ local function kindcheck_arity (env, t)
     end
     for i,tpar in ipairs(t[3]) do
       local tbound = tpar[3]
-      if not kindcheck_arity(env, tbound) then
+      if not kindcheck_arity(env, tbound, context) then
         tpar[3] = Any
       end
     end  
-    if not kindcheck_arity(env, t[1]) then
+    if not kindcheck_arity(env, t[1], context) then
       t[1] = Any
     end
     tlst.invert_variance(env)
-    if not kindcheck_arity(env, t[2]) then
+    if not kindcheck_arity(env, t[2], context) then
       t[2] = Any
     end
     tlst.end_scope(env)
     return true
   elseif t.tag == "TField" then
     tlst.invert_variance(env)
-    if not kindcheck_arity(env,t[1]) then
+    if not kindcheck_arity(env,t[1], context) then
       t[1] = Any
     end
     tlst.invert_variance(env)
     if tltype.isConstField(t) then
-      if not kindcheck_arity(env,t[2]) then
+      if not kindcheck_arity(env, t[2], context) then
         t[2] = Any
       end
     else
       local orig_variance = env.variance
       tlst.set_variance(env, "Invariant")
-      if not kindcheck_arity(env,t[2]) then
+      if not kindcheck_arity(env, t[2], context) then
         t[2] = Any
       end
       env.variance = orig_variance      
@@ -184,7 +189,7 @@ local function kindcheck_arity (env, t)
     return true
   elseif t.tag == "TTable" then
     for i,field in ipairs(t) do
-      if not kindcheck_arity(env,field) then
+      if not kindcheck_arity(env, field, context) then
         t[i] = Any
       end
     end
@@ -193,11 +198,28 @@ local function kindcheck_arity (env, t)
     expand_typealias(env, t)
     local name = t[1]
     local args = t[2]
+    
+    if context and (context.tag == "Inheritance" or context.tag == "Bound") then
+      if context.bundle_typenames[name] then
+        local msg = "occurences of mutually recursive type %s not allowed in %s"
+        msg = string.format(msg, name, context.desc)
+        typeerror(env, "kind", msg, t.pos)
+        return false
+      end
+    end
+    
     local ti = tlst.get_typeinfo(env, name)
     if not ti then
-      local msg = string.format("Undeclared type %s", name)
-      typeerror(env, "kind", msg, t.pos)
-      return false
+      if context and context.tag == "InferredReturnType" then
+        local msg = "locally-scoped type %s occurs in inferred return type %s"
+        msg = string.format(msg, name, tltype.tostring(context.t))
+        typeerror(env, "kind", msg, context.pos)
+        return false
+      else
+        local msg = string.format("Undeclared type %s", name)
+        typeerror(env, "kind", msg, t.pos)
+        return false
+      end      
     else
       if ti.tag == "TINominal" then
         local tpars = ti[2]
@@ -210,19 +232,19 @@ local function kindcheck_arity (env, t)
           for i,tpar in ipairs(tpars) do
             local variance = tpar[2]
             if variance == "Covariant" then
-              if not kindcheck_arity(env,args[i]) then
+              if not kindcheck_arity(env, args[i], context) then
                 args[i] = Any
               end
             elseif variance == "Contravariant" then
               tlst.invert_variance(env)
-              if not kindcheck_arity(env, args[i]) then
+              if not kindcheck_arity(env, args[i], context) then
                 args[i] = Any
               end
               tlst.invert_variance(env)
             elseif variance == "Invariant" then
               local orig_variance = env.variance
               tlst.set_variance(env, "Invariant")
-              if not kindcheck_arity(env,args[i]) then
+              if not kindcheck_arity(env, args[i], context) then
                 args[i] = Any
               end
               env.variance = orig_variance
@@ -247,7 +269,6 @@ local function kindcheck_arity (env, t)
           typeerror(env, "kind", msg, t.pos)
           return false
         end
-        
         return true
       else
         if #args > 0 then
@@ -260,18 +281,19 @@ local function kindcheck_arity (env, t)
       end
     end
   elseif t.tag == "TVararg" then
-    if not kindcheck_arity(env, t[1]) then
+    if not kindcheck_arity(env, t[1], context) then
       t[1] = Any
     end
     return true
   else
-    assert("kind checking error: expected type, got " .. t.tag) 
+    error("kind checking error: expected type, got " .. t.tag) 
   end  
 end
 
+
 --full kindchecking, including arity, definedness, and type bounds on type operator arguments
 -- (env, type, context?) -> (boolean)
-local function kindcheck (env, t, context)
+local function kindcheck_bounds (env, t, context)
   if t.tag == "TLiteral" then
     return true
   elseif t.tag == "TBase" then
@@ -288,26 +310,26 @@ local function kindcheck (env, t, context)
     return true
   elseif t.tag == "TUnion" then
     for i,elem in ipairs(t) do
-      if not kindcheck(env, elem, context) then
+      if not kindcheck_bounds(env, elem, context) then
         t[i] = Any
       end
     end
     return true
   elseif t.tag == "TVarArg" then
-    if not kindcheck(env, t[1], context) then
+    if not kindcheck_bounds(env, t[1], context) then
       t[1] = Any
     end
     return true
   elseif t.tag == "TTuple" then
     for i,elem in ipairs(t) do
-      if not kindcheck(env, elem, context) then
+      if not kindcheck_bounds(env, elem, context) then
         t[i] = Any
       end
     end
     return true
-  elseif t.tag == "TUnionList" then
+  elseif t.tag == "TUnionlist" then
     for i,elem in ipairs(t) do
-      if not kindcheck(env, elem, context) then
+      if not kindcheck_bounds(env, elem, context) then
         t[i] = Any
       end
     end
@@ -324,33 +346,33 @@ local function kindcheck (env, t, context)
     end
     for i,tpar in ipairs(t[3]) do
       local tbound = tpar[3]
-      if not kindcheck(env, tbound, context) then
+      if not kindcheck_bounds(env, tbound, context) then
         tpar[3] = Any
       end
     end  
-    if not kindcheck(env, t[1], context) then
+    if not kindcheck_bounds(env, t[1], context) then
       t[1] = Any
     end
     tlst.invert_variance(env)
-    if not kindcheck(env, t[2], context) then
+    if not kindcheck_bounds(env, t[2], context) then
       t[2] = Any
     end
     tlst.end_scope(env)
     return true
   elseif t.tag == "TField" then
     tlst.invert_variance(env)
-    if not kindcheck(env, t[1], context) then
+    if not kindcheck_bounds(env, t[1], context) then
       t[1] = Any
     end
     tlst.invert_variance(env)
     if tltype.isConstField(t) then
-      if not kindcheck(env, t[2], context) then
+      if not kindcheck_bounds(env, t[2], context) then
         t[2] = Any
       end
     else
       local orig_variance = env.variance
       tlst.set_variance(env, "Invariant")
-      if not kindcheck(env, t[2], context) then
+      if not kindcheck_bounds(env, t[2], context) then
         t[2] = Any
       end
       env.variance = orig_variance      
@@ -358,7 +380,7 @@ local function kindcheck (env, t, context)
     return true
   elseif t.tag == "TTable" then
     for i,field in ipairs(t) do
-      if not kindcheck(env, field, context) then
+      if not kindcheck_bounds(env, field, context) then
         t[i] = Any
       end
     end
@@ -369,108 +391,44 @@ local function kindcheck (env, t, context)
     local args = t[2]
     local ti = tlst.get_typeinfo(env, name)
     if not ti then
-      if context then
-        if context.tag == "InferredReturnType" then
-          local msg = "locally-scoped type %s occurs in inferred return type %s"
-          msg = string.format(msg, name, tltype.tostring(context.t))
-          typeerror(env, "kind", msg, context.pos)
-          return false
-        else
-          error("unknown kindchecking context")
-        end
-      else
-        local msg = string.format("Undeclared type %s", name)
-        typeerror(env, "kind", msg, t.pos)
-        return false
-      end
+      error("arity kindchecking should be performed before bound kindchecking")
     else
       if ti.tag == "TINominal" then
         local tpars = ti[2]
-        
-        if #tpars ~= #args then
-          local msg = string.format("%s expected %d arguments but received %d",name,#tpars,#args)
-          typeerror(env, "kind", msg, t.pos)
-          return false
-        else
-          local names = {}
-          for i=1,#tpars do
-            names[#names + 1] = tpars[i][1]
-          end
-              
-          for i,tpar in ipairs(tpars) do
-            local variance = tpar[2]
-            if variance == "Covariant" then
-              if not kindcheck(env, args[i], context) then
-                args[i] = Any
-              end
-            elseif variance == "Contravariant" then
-              tlst.invert_variance(env)
-              if not kindcheck(env, args[i], context) then
-                args[i] = Any
-              end
-              tlst.invert_variance(env)
-            elseif variance == "Invariant" then
-              local orig_variance = env.variance
-              tlst.set_variance(env, "Invariant")
-              if not kindcheck(env, args[i], context) then
-                args[i] = Any
-              end
-              env.variance = orig_variance
-            end
-            
-            local bound = tpar[3] 
-            if bound ~= "NoBound" then
-              bound = tltype.substitutes(bound, names, args)
-              local succ, explanation = tltype.consistent_subtype(env, args[i], bound) 
-              if not succ then
-                local msg = string.format("%s is not a subtype of %s", tltype.tostring(args[i]), tltype.tostring(bound))
-                typeerror(env, "kind", msg .. "\n" .. explanation, args[i].pos)
-                args[i] = Any
-              end
+        assert(#tpars == #args)
+        local names = {}
+        for i=1,#tpars do
+          names[#names + 1] = tpars[i][1]
+        end
+        for i,tpar in ipairs(tpars) do
+          local bound = tpar[3] 
+          if bound ~= "NoBound" then
+            bound = tltype.substitutes(bound, names, args)
+            local succ, explanation = tltype.consistent_subtype(env, args[i], bound) 
+            if not succ then
+              local msg = string.format("%s is not a subtype of %s", tltype.tostring(args[i]), tltype.tostring(bound))
+              typeerror(env, "kind", msg .. "\n" .. explanation, args[i].pos)
+              args[i] = Any
             end
           end
-          return true
         end
-      elseif ti.tag == "TIVariable" then
-        if #args > 0 then
-          local msg = string.format("Only class/interface types should be supplied type arguments")
-          typeerror(env, "kind", msg, t.pos)
-          return false
-        end
-        if (ti[2] == "Covariant" or ti[2] == "Bivariant") and not tlst.is_covariant(env) then
-          local msg = "Non-covariant usage of covariant type variable %s"
-          msg = string.format(msg, name)
-          typeerror(env, "kind", msg, t.pos)
-          return false
-        elseif (ti[2] == "Contravariant" or ti[2] == "Bivariant") and not tlst.is_contravariant(env) then
-          local msg = "Non-contravariant usage of contravariant type variable %s"
-          msg = string.format(msg, name)
-          typeerror(env, "kind", msg, t.pos)
-          return false
-        end
-        
         return true
       else
-        if #args > 0 then
-          local msg = string.format("Only class/interface types should be supplied type arguments")
-          typeerror(env, "kind", msg, t.pos)
-          return false
-        else
-          return true
-        end
+        return true
       end
     end
   elseif t.tag == "TVararg" then
-    if not kindcheck(env, t[1], context) then
+    if not kindcheck_bounds(env, t[1], context) then
       t[1] = Any
     end
     return true
   else
-    assert("kind checking error: expected type, got " .. t.tag) 
+    error("kind checking error: expected type, got " .. t.tag) 
   end  
 end
 
-local function kindcheck_tpars(env, tpars)
+local function kindcheck_tpars(env, tpars, bundle_typenames)
+  local context = { tag = "Bound", desc = "type parameter bound", bundle_typenames = bundle_typenames or {}}
   tlst.begin_scope(env)
   set_tpars(env, tpars)
   
@@ -479,7 +437,8 @@ local function kindcheck_tpars(env, tpars)
   for _,tpar in ipairs(tpars) do
     local tbound = tpar[3]
     tlst.set_variance(env, "Contravariant")
-    if tbound ~= "NoBound" and not kindcheck_arity(env, tbound) then
+
+    if tbound ~= "NoBound" and not kindcheck_arity(env, tbound, context) then
       tpar[3] = Any
     end
   end
@@ -489,13 +448,24 @@ local function kindcheck_tpars(env, tpars)
   for _,tpar in ipairs(tpars) do
     local tbound = tpar[3]
     tlst.set_variance(env, "Contravariant")
-    if tbound ~= "NoBound" and not kindcheck(env, tbound) then
+    if tbound ~= "NoBound" and not kindcheck_bounds(env, tbound, context) then
       tpar[3] = Any
     end
   end     
   
   tlst.end_scope(env)
 end
+
+--full kindchecking, including arity, definedness, and type bounds on type operator arguments
+-- (env, type, context?) -> (boolean)
+local function kindcheck (env, t, context)
+  if not kindcheck_arity(env, t, context) then
+    return false
+  else
+    return kindcheck_bounds(env, t, context)
+  end
+end
+
 
 local function check_self (env, torig, t, pos)
   local msg = string.format("self type appearing in a place that is not a first parameter or a return type inside type '%s', replacing with 'any'", tltype.tostring(torig))
@@ -2536,6 +2506,7 @@ local function check_typebundle (env, stm)
       typeerror(env, "alias", msg, def.pos)
       return false
     else
+      tlst.set_typealias(env, name, typename)
       bundle_typenames[typename] = true
     end
   end
@@ -2546,7 +2517,7 @@ local function check_typebundle (env, stm)
       local tpars
       if def.tag == "Class" then tpars = def[5]
       elseif def.tag == "Interface" then tpars = def[2] end
-      kindcheck_tpars(env, tpars)
+      kindcheck_tpars(env, tpars, bundle_typenames)
     end
   end
   
@@ -2557,12 +2528,12 @@ local function check_typebundle (env, stm)
       if tsuper ~= "NoParent" then
         tlst.begin_scope(env) --check inheritance clause
         set_tpars(env, def[5])
-        
-        --TODO: add an extra optional parameter to kindcheck which generates special
-        --error for names defined by the bundle (bundle_typenames)
-        --these will alert the programmer that we can't inherit from types involving those defined in the bundle
-        --and likewise, we can't use them in class parameter bounds
-        if not kindcheck(env, tsuper) then
+        local context = { 
+          tag = "Inheritance", 
+          desc = "inheritance clause", 
+          bundle_typenames = bundle_typenames 
+        }
+        if not kindcheck(env, tsuper, context) then
           tlst.end_scope(env) --check inheritance clause
           -- we can't inherit from Any, so we just abort typechecking the budle if this happens,
           -- and leave the environment untouched by this bundle definitions
@@ -2581,7 +2552,6 @@ local function check_typebundle (env, stm)
       local typename = make_typename(env, def[1], is_local)
       local ti = tlst.typeinfo_Structural(Any)
       tlst.set_typeinfo(env, typename, ti, is_local)
-      tlst.set_typealias(env, name, typename)
     elseif def.tag == "Class" or def.tag == "Interface" then
       local name = def[1]
       local tparams = def.tag == "Class" and def[5] or def[2]
@@ -2589,7 +2559,6 @@ local function check_typebundle (env, stm)
       local ti = tlst.typeinfo_Nominal(typename, Any, tparams, true)
       name.global_name = typename
       tlst.set_typeinfo(env, typename, ti, is_local)
-      tlst.set_typealias(env, name[1], typename)
     end
   end
   
