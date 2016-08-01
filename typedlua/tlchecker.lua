@@ -2500,6 +2500,7 @@ local function check_typebundle (env, stm)
   for _,def in ipairs(defs) do
     local name = def[1][1]
     local typename = make_typename(env, def[1], is_local)
+    def[1].global_name = typename
     if tlst.get_typeinfo(env, typename) or bundle_typenames[typename] then
       local msg = "attempt to redeclare type '%s'"
       msg = string.format(msg, typename)
@@ -2534,7 +2535,6 @@ local function check_typebundle (env, stm)
           bundle_typenames = bundle_typenames 
         }
         if not kindcheck(env, tsuper, context) then
-          tlst.end_scope(env) --check inheritance clause
           -- we can't inherit from Any, so we just abort typechecking the budle if this happens,
           -- and leave the environment untouched by this bundle definitions
           tlst.end_scope(env)
@@ -2557,7 +2557,6 @@ local function check_typebundle (env, stm)
       local tparams = def.tag == "Class" and def[5] or def[2]
       local typename = make_typename(env, name, is_local)      
       local ti = tlst.typeinfo_Nominal(typename, Any, tparams, true)
-      name.global_name = typename
       tlst.set_typeinfo(env, typename, ti, is_local)
     end
   end
