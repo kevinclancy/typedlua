@@ -24,7 +24,7 @@ local Number = tltype.Number()
 local String = tltype.String()
 local Integer = tltype.Integer(false)
 
-local check_block, check_stm, check_exp, check_var, check_id, check_typedefs
+local check_block, check_stm, check_exp, check_var, check_id, check_typebundle
 
 local function lineno (s, i)
   if i == 1 then return 1, 1 end
@@ -721,7 +721,7 @@ local function check_tld (env, name, path, pos)
     if tag == "Id" then
       table.insert(t, tltype.Field(v.const, tltype.Literal(v[1]), v[2]))
     elseif tag == "TypeBundle" then
-      check_typedefs(env, v)
+      check_typebundle(env, v)
     elseif tag == "Userdata" then
       check_userdata(env, v)
     else
@@ -2520,7 +2520,7 @@ local function make_tmethod (parlist, rettype)
   return tltype.Function({}, t1, t2, true)
 end
 
-local function check_typedefs (env, stm)
+local function check_typebundle (env, stm)
   assert(stm.tag == "TypeBundle")
   local defs = stm[1]
   local is_local = env.scope > 1
@@ -3066,7 +3066,7 @@ function check_stm (env, stm)
   elseif tag == "Invoke" then
     return check_invoke(env, stm)
   elseif tag == "TypeBundle" then
-    return check_typedefs(env, stm)
+    return check_typebundle(env, stm)
   elseif tag == "Implements" then
     return check_implements(env, stm)
   else
