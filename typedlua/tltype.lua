@@ -1422,6 +1422,7 @@ function subtype (assume, env, t1, t2, relation, verbose)
   if relation == "<:" and tltype.isAny(t1) and tltype.isAny(t2) then
     return true
   elseif relation == "<:" and (tltype.isAny(t1) or tltype.isAny(t2)) then
+    local t1_str, t2_str = tltype.tostring(t1), tltype.tostring(t2)
     return false, string.format("%s is not a subtype of %s", t1_str, t2_str)
   elseif tltype.isAny(t1) or tltype.isAny(t2) then
     return true
