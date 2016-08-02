@@ -80,8 +80,8 @@ local G = lpeg.P { "TypedLuaDescription";
   KeyType = lpeg.V("BaseType") + lpeg.V("ValueType") + lpeg.V("AnyType");
   FieldType = lpeg.Cp() * lpeg.V("Type") * lpeg.Cc(tltype.Nil()) / tltype.PUnion;
   VariableType = lpeg.Cp() * tllexer.token(tllexer.Name, "Type") / tltype.PSymbol;
-  RetType = lpeg.Cp() * lpeg.V("NilableTuple") +
-            lpeg.V("Type") * lpeg.Carg(2) / tltype.PretType;
+  RetType = lpeg.V("NilableTuple") +
+            (lpeg.Cp() * lpeg.V("Type") * lpeg.Carg(2) / tltype.PretType);
             
   TypeVariance = (tllexer.symb("+") * lpeg.Cc("Covariant")) +
                  (tllexer.symb("-") * lpeg.Cc("Contravariant")) +

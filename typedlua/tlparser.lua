@@ -93,8 +93,8 @@ local G = lpeg.P { "TypedLua";
   TypeId = lpeg.Cp() * tllexer.token(tllexer.TypeName, "TypeId") / tlast.typeIdent;
   VariableType = lpeg.Cp() * tllexer.token(tllexer.TypeName, "Type") * 
                  (lpeg.V("TypeArgs") + lpeg.Cc({})) / tltype.PSymbol;
-  RetType = lpeg.Cp() * lpeg.V("NilableTuple") +
-            lpeg.V("Type") * lpeg.Carg(2) / tltype.retType;
+  RetType = lpeg.V("NilableTuple") +
+            (lpeg.Cp() * lpeg.V("Type") * lpeg.Carg(2) / tltype.PretType);
   Id = lpeg.Cp() * tllexer.token(tllexer.Name, "Name") / tlast.ident;
   TypeDecId = (tllexer.kw("const") * lpeg.V("Id") / tlast.setConst) +
               lpeg.V("Id");

@@ -499,7 +499,7 @@ end
 
 -- PretType: (number, type, boolean) -> (type)
 function tltype.PretType (pos, t, strict)
-  local ret = tltype.retType(tltype.Tuple({ t }), strict)
+  local ret = tltype.retType(t, strict)
   ret.pos = pos
   return ret
 end
