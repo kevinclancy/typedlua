@@ -2578,14 +2578,26 @@ local function check_typebundle (env, stm)
     end
   end
   
-  --add reflexive nominal edges and nominal edges for each inheritance clause in the bundle
+  --add reflexive edges for each nominal type
+  for _,def in ipairs(defs) do
+    if def.tag == "Class" or def.tag == "Interface" then
+      local typename = make_typename(env, def[1], is_local)
+      local tparams = def.tag == "Class" and def[5] or def[2]
+      tlst.add_reflexive_edge(env, typename, tparams)
+    end
+  end
+  
+  --add nominal edges for each inheritance clause in the bundle
   for _,def in ipairs(defs) do
     if def.tag == "Class" then
       local name, tsuper = def[1], def[4]
       local typename = make_typename(env, name, is_local)
-      --tlst.add_nominal_edge(env, typename, typename, , tltype.substitutes, env.scope > 1)
       if tsuper ~= "NoParent" then
-        tlst.add_nominal_edge(env, typename, tsuper[1], tsuper[2], tltype.substitutes, is_local)
+        local succ, msg = tlst.add_nominal_edge(env, typename, tsuper[1], tsuper[2], tltype.substitutes, is_local)
+        if not succ then
+          typeerror(env, "inheritance", msg, tsuper.pos)
+          return false
+        end
       end
     end
   end
@@ -2744,7 +2756,10 @@ local function check_typebundle (env, stm)
         local succ, explanation = tltype.consistent_subtype(env, t_instance, tltype.unfold(env, t))
         if succ then
           env.scope = env.scope - 1 --add nominal edge to the scope above this class's scope
-          tlst.add_nominal_edge(env, typename, t[1], t[2], tltype.substitutes, is_local)
+          local succ, msg =  tlst.add_nominal_edge(env, typename, t[1], t[2], tltype.substitutes, is_local)
+          if not succ then
+            typeerror(env, "implements", msg, t.pos)
+          end
           env.scope = env.scope + 1
         else
           local par_tsymbols = {}
@@ -2884,7 +2899,11 @@ local function check_implements (env, stm)
   for _,t in ipairs(t2[2]) do
     instantiation[#instantiation + 1] = tltype.substitutes(t, param_names, ti1_symbols)
   end
-  tlst.add_nominal_edge(env, t1[1], t2[1], instantiation, tltype.substitutes, env.scope > 1)
+  
+  local succ, msg = tlst.add_nominal_edge(env, t1[1], t2[1], instantiation, tltype.substitutes, env.scope > 1)
+  if not succ then
+    typeerror(env, "implements", msg, stm.pos)
+  end
 end
 
 function check_id (env, exp)

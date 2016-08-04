@@ -4,6 +4,17 @@ Miscellaneous utility functions
 
 local tlutils = {}
 
+function tlutils.abbreviate(typename)
+  local rev = string.reverse(typename)
+  local dotpos = string.find(rev, "%.")
+  if dotpos == nil then
+    return typename
+  else
+    local s =  string.sub(rev,1,dotpos-1)
+    return string.reverse(s)
+  end
+end
+
 function tlutils.order_description(i)
   local s = tostring(i)
   local c = s[#s]

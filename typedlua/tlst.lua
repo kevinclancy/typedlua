@@ -4,13 +4,15 @@ This module implements Typed Lua symbol table.
 
 local tlst = {}
 
+local tlutils = require "typedlua.tlutils"
+
 -- new_globalenv 
 function tlst.new_globalenv()
   local genv = {}
-  genv.nominal = {}
   genv.class_types = {}
   genv.types = {}
   genv.nominal_edges = {}
+  genv.nominal_children = {}  
   genv.loaded = {}
   return genv
 end
@@ -57,6 +59,46 @@ function tlst.typeinfo_Variable (tbound, variance, name)
   return { tag = "TIVariable", [1] = tbound, [2] = variance, [3] = name }
 end
 
+
+
+-- appends all the children of the nominal type typename onto the end of
+-- children_out
+-- (env, string, {string}) -> ()
+function tlst.get_nominal_children (env, typename, children_out)
+  local scope = env.scope
+  for s = scope, 1, -1 do
+    if env[s].nominal_children[typename] then
+      for _,descendant in pairs(env[s].nominal_children[typename]) do
+        children_out[#children_out + 1] = descendant
+      end
+    end
+  end  
+  
+  if env.genv.nominal_children[typename] then
+    for _,descendant in pairs(env.genv.nominal_children[typename]) do
+      children_out[#children_out + 1] = descendant
+    end    
+  end    
+end
+
+-- returns an array of all of the nominal descendants of typename, inclusive
+-- (env, string) -> ({string : boolean})
+function tlst.get_nominal_descendants (env, typename)
+  local visited_descendants = { [typename] = true }
+  local to_visit = {}
+  tlst.get_nominal_children(env, typename, to_visit)
+  local i = 1
+  while i <= #to_visit do
+    local curr = to_visit[i]
+    if not visited_descendants[curr] then
+      visited_descendants[curr] = true
+      tlst.get_nominal_children(env, curr, to_visit)
+    end
+    i = i + 1
+  end
+  return visited_descendants
+end
+
 function tlst.get_all_nominal_edges (env, source, edge_map_out)
   local scope = env.scope
   for s = scope, 1, -1 do
@@ -85,16 +127,6 @@ function tlst.get_nominal_edges (env, source, dest, array_out)
   local tisource = tlst.get_typeinfo(env, source)
   local tidest = tlst.get_typeinfo(env, dest)
   assert(tisource.tag == "TINominal" and tidest.tag == "TINominal")
-  if tisource == tidest then
-    local targs = {}
-    local tpars = tisource[2]
-    for _,tpar in ipairs(tpars) do
-      local parname = tpar[1]
-      targs[#targs + 1] = { tag = "TSymbol", [1] = parname, [2] = {} }
-    end
-    array_out[#array_out + 1] = { path = {}, inst = targs }
-    return
-  end
   
   for i,_ in ipairs(array_out) do array_out[i] = nil end
   local scope = env.scope
@@ -119,52 +151,122 @@ function tlst.get_nominal_edges (env, source, dest, array_out)
   end
 end
 
--- (env, string, string, {type}, (type, string, type) -> (type)) -> ()
-function tlst.add_nominal_edge (env, source, dest, instantiation, subst, is_local)
-  local s = env.scope
-  
+-- adds edge and returns true if no cycles are detected. returns false, 
+-- error message without adding edges otherwise
+-- (env, string, string, {type}, (type, string, type) -> (type)) -> (boolean)
+function tlst.add_nominal_edge (env, source, dest, instantiation, subst, is_local)  
   local ti_source = tlst.get_typeinfo(env,source)
   local ti_dest = tlst.get_typeinfo(env,dest)
   assert(ti_source ~= nil and ti_source.tag == "TINominal")
   assert(ti_dest ~= nil and ti_dest.tag == "TINominal")
+  local source_params = ti_source[2]
   local dest_params = ti_dest[2]
   assert(#instantiation == #dest_params)
   
-  local dest_edges = {}
-  tlst.get_all_nominal_edges(env, dest, dest_edges)
+  local dest_ancestors = {}
+  tlst.get_all_nominal_edges(env, dest, dest_ancestors)
   
-  local nominal_edges = is_local and env[s].nominal_edges or env.genv.nominal_edges
+  local senv = is_local and env[env.scope] or env.genv
   
-  -- add direct edge
-  nominal_edges[source] = nominal_edges[source] or {}
-  local src_edges = nominal_edges[source]
-  src_edges[dest] = src_edges[dest] or {}
-  local src_dest_edges = src_edges[dest]
-  src_dest_edges[#src_dest_edges + 1] = { path = {source}, inst = instantiation }
+  local nominal_edges = senv.nominal_edges
+    
+  local source_descendants = tlst.get_nominal_descendants(env, source)
   
-  -- add transitive edges
-  for to, dest_to_ancestor in pairs(dest_edges) do
-    src_edges[to] = src_edges[to] or {}
-    local src_to_ancestor = src_edges[to]
-    for _,edge in ipairs(dest_to_ancestor) do
-      --checking for cycles should be done externally
-      assert(to ~= source)
+  --check for trivial cycles
+  if source == dest then
+    return false, "cannot introduce self edges to subtyping graph"
+  end
+  
+  --check for non-trivial cycles
+  for ancestor,edges in pairs(dest_ancestors) do
+    if source_descendants[ancestor] then
+      --edge would introduce a non-trivial cycle, report error and abort
+      local dest_ancestor_path = edges[1].path
       
-      local dest_param_names = {}
-      for i,v in ipairs(dest_params) do dest_param_names[i] = v[1] end
-      local new_instantiation = {}
-      for j,t in ipairs(edge.inst) do
-        new_instantiation[j] = subst(t, dest_param_names, instantiation)
-      end
+      local ancestor_src_edges = {}
+      tlst.get_nominal_edges(env, ancestor, source, ancestor_src_edges)
       
-      local new_path = { source }
-      for j,typename in ipairs(edge.path) do
-        new_path[j+1] = typename
+      assert(#ancestor_src_edges > 0)
+      local ancestor_src_path = ancestor_src_edges[1].path
+      
+      local loop_desc = ""
+      local first = true
+      for _,typename in ipairs(ancestor_src_path) do
+        if first then
+          loop_desc = loop_desc .. tlutils.abbreviate(typename)
+        else
+          loop_desc = loop_desc .. " -> " .. tlutils.abbreviate(typename)
+        end
+        first = false
       end
-
-      src_to_ancestor[#src_to_ancestor + 1] = { path = new_path, inst = new_instantiation }
+      for _,typename in ipairs(dest_ancestor_path) do
+        if first then
+          loop_desc = loop_desc .. tlutils.abbreviate(typename)
+        else
+          loop_desc = loop_desc .. " -> " .. tlutils.abbreviate(typename)
+        end        
+        first = false
+      end
+    
+      local msg = "adding a subtyping edge from %s to %s would create the following cycle:\n"
+      msg = msg .. loop_desc
+      msg = string.format(msg, source, dest)
+      return false, msg
     end
   end
+  
+  local source_param_names = {}
+  for k,v in ipairs(source_params) do
+    source_param_names[#source_param_names + 1] = v[1]
+  end
+  
+  local dest_param_names = {}
+  for k,v in ipairs(dest_params) do
+    dest_param_names[#dest_param_names + 1] = v[1]
+  end
+  
+  for descendant,_ in pairs(source_descendants) do
+    local desc_src_edges = {}
+    tlst.get_nominal_edges(env, descendant, source, desc_src_edges)
+    
+    for ancestor,dest_ancestor_edges in pairs(dest_ancestors) do
+      for _,desc_src_edge in ipairs(desc_src_edges) do
+        for _,dest_ancestor_edge in ipairs(dest_ancestor_edges) do
+          --create a new nominal edge going from  descendant to ancestor in two steps
+          --1 - substitute descendant -> source instantiations into source -> dest instantiations
+          local inst1 = {}
+          for _,inst in ipairs(instantiation) do
+            inst1[#inst1 + 1] = subst(inst, source_param_names, desc_src_edge.inst)
+          end
+          
+          --2 - substitute resulting instantiations into dest -> ancestor instantiations
+          local inst2 = {}
+          for _, inst in ipairs(dest_ancestor_edge.inst) do
+            inst2[#inst2 + 1] = subst(inst, dest_param_names, inst1)
+          end
+          
+          local new_path = {}
+          for j,typename in ipairs(desc_src_edge.path) do
+            new_path[#new_path + 1] = typename
+          end
+          for j,typename in ipairs(dest_ancestor_edge.path) do
+            new_path[#new_path + 1] = typename
+          end
+          
+          senv.nominal_edges[descendant] = senv.nominal_edges[descendant] or {}
+          senv.nominal_edges[descendant][ancestor] = senv.nominal_edges[descendant][ancestor] or {}
+          local da_edges = senv.nominal_edges[descendant][ancestor]
+          da_edges[#da_edges + 1] = { path = new_path, inst = inst2 }
+        end
+      end
+    end
+  end
+  
+  senv.nominal_children[dest] = senv.nominal_children[dest] or {}
+  local dest_children = senv.nominal_children[dest]
+  dest_children[#dest_children + 1] = source
+    
+  return true
 end
 
 -- get_classtype : (env, string) -> (type?)
@@ -241,6 +343,7 @@ local function new_scope ()
   senv.class_types = {}
   senv.type_aliases = {}
   senv.nominal_edges = {}
+  senv.nominal_children = {}
   return senv
 end
 
@@ -373,14 +476,21 @@ function tlst.get_typealias (env, alias)
   return nil
 end
 
+function tlst.add_reflexive_edge(env, name, tpars, is_local)
+  local senv = is_local and env[env.scope] or env.genv
+  local targs = {}
+  for _,tpar in ipairs(tpars) do
+    local parname = tpar[1]
+    targs[#targs + 1] = { tag = "TSymbol", [1] = parname, [2] = {} }
+  end
+  senv.nominal_edges[name] = {}
+  senv.nominal_edges[name][name] = { { path = {name}, inst = targs} }  
+end
+
 -- set_typeinfo : (env,name,typeinfo,bool) -> ()
 function tlst.set_typeinfo (env, name, ti, is_local)
-  if is_local then
-    local scope = env.scope
-    env[scope].types[name] = ti
-  else
-    env.genv.types[name] = ti
-  end
+  local senv = is_local and env[env.scope] or env.genv
+  senv.types[name] = ti
 end
 
 -- get_typeinfo : (env,string) -> (typeinfo?)
