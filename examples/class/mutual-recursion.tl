@@ -15,6 +15,7 @@ and class Hello<T>
   end
 
   constructor new(f : Foo, b : Bar, z : T)
+    local a = Hello.new<number>(f,b,2)
     self.x = f
     self.y = b
     self.z = z
@@ -25,4 +26,4 @@ end
 local p : Foo = { "Test", { "Test", nil, nil } }
 local q : Bar = { "Test", nil }
 
-class(Hello).new<number>(p,q,3)
+Hello.new<number>(p,q,3)

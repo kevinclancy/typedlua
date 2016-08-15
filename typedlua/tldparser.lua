@@ -122,6 +122,11 @@ local G = lpeg.P { "TypedLuaDescription";
                      lpeg.Ct(lpeg.V("InterfaceElement")^0) *
                      tllexer.kw("end") / tlast.statInterface;
                      
+  ShapeDefStat = lpeg.Cp() * tllexer.kw("shape") * lpeg.V("Id") *
+                 (lpeg.V("TypeParams") + lpeg.Cc({})) *
+                 lpeg.Ct(lpeg.V("InterfaceElement")^0) *
+                 tllexer.kw("end") / tlast.statShape;
+                 
   InterfaceElement = lpeg.Cp() * tllexer.kw("method") * lpeg.V("Id") * 
                      tllexer.symb(":") * lpeg.V("MethodType") /
                      tlast.classElementAbstractMethod;      
@@ -129,7 +134,7 @@ local G = lpeg.P { "TypedLuaDescription";
   TypeBundle = lpeg.Ct(lpeg.V("TypeDefinition") * 
                (tllexer.kw("and") * lpeg.V("TypeDefinition"))^0) / tlast.statTypeBundle;
                        
-  TypeDefinition = lpeg.V("StructuralTypedef") + lpeg.V("InterfaceDefStat");
+  TypeDefinition = lpeg.V("StructuralTypedef") + lpeg.V("InterfaceDefStat") + lpeg.V("ShapeDefStat");
   
   -- parser
   Userdata = lpeg.Cp() * tllexer.kw("userdata") * lpeg.V("TypeDec") /

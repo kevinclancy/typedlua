@@ -231,6 +231,10 @@ function tlast.statInterface (pos, name, tpars, elems)
   return { tag = "Interface", pos = pos, [1] = name, [2] = tpars, [3] = elems }
 end
 
+function tlast.statShape (pos, name, tpars, elems)
+  return { tag = "Interface", pos = pos, is_shape = true, [1] = name, [2] = tpars, [3] = elems }
+end
+
 function tlast.statTypeBundle (typedefs)
   return { tag = "TypeBundle", [1] = typedefs }
 end

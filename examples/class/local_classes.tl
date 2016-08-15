@@ -6,9 +6,8 @@ local function BadFunction(a,b,c)
       print("woof")
     end
     
-    method clone() : TestClass
+    method clone() : (TestClass)
       local x = class(TestClass).new()
-      x:Speak()
       return x
     end
     
@@ -22,13 +21,12 @@ end
 
 local function DogFunction(a,b,c)
   class TestClass
-    method Speak() : any
+    method Speak() : ()
       print("woof")
     end
     
     method clone() : TestClass
       local x = class(TestClass).new()
-      x:Speak()
       return x
     end
     

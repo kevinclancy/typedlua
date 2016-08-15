@@ -164,7 +164,8 @@ local G = lpeg.P { "TypedLua";
                   lpeg.Ct( lpeg.V("InvTypeParam") * (tllexer.symb(",") * lpeg.V("InvTypeParam"))^0 ) * 
                   tllexer.symb(">");
   
-  TypeDefinition = lpeg.V("ClassDefStat") + lpeg.V("StructuralTypedef") + lpeg.V("InterfaceDefStat");
+  TypeDefinition = lpeg.V("ClassDefStat") + lpeg.V("StructuralTypedef") + lpeg.V("InterfaceDefStat") +
+                   lpeg.V("ShapeDefStat");
   
   TypeBundle = lpeg.Ct(lpeg.V("TypeDefinition") * 
                          (tllexer.kw("and") * lpeg.V("TypeDefinition"))^0) / tlast.statTypeBundle;
@@ -191,6 +192,11 @@ local G = lpeg.P { "TypedLua";
                      (lpeg.V("TypeParams") + lpeg.Cc({})) *
                      lpeg.Ct(lpeg.V("InterfaceElement")^0) *
                      tllexer.kw("end") / tlast.statInterface;
+                     
+  ShapeDefStat = lpeg.Cp() * tllexer.kw("shape") * lpeg.V("Id") *
+                 (lpeg.V("TypeParams") + lpeg.Cc({})) *
+                 lpeg.Ct(lpeg.V("InterfaceElement")^0) *
+                 tllexer.kw("end") / tlast.statShape;
                      
   ImplementsStat = lpeg.Cp() * lpeg.V("Type") * 
                    tllexer.kw("implements") * lpeg.V("Type") / tlast.statImplements;

@@ -1,5 +1,5 @@
 
-interface Op<+X>
+shape IOp<+X>
   method GetOp : () => (X)
 end
 
@@ -21,11 +21,11 @@ and class Bar<T,S>
   end
 end
 
-Foo<Z,Z> implements Op< Bar<Z,Z> > --generates error
-Foo implements Op< Bar<T,S> > --generates error
-number implements Op< Bar<number, number> > -- generates error
+Foo<Z,Z> implements IOp< Bar<Z,Z> > --generates error
+Foo implements IOp< Bar<T,S> > --generates error
+number implements IOp< Bar<number, number> > -- generates error
 
-class OpList< X <: Op<Y>, Y <: Op<X> >
+class OpList< X <: IOp<Y>, Y <: IOp<X> >
   const contents : {X}
   
   method GetOp() : OpList<Y,X>
@@ -49,15 +49,18 @@ typedef Bar2 = Bar<number,number>
 
 local foos : {Foo2} = {}
 
+do
+  local opList = OpList.new<Foo2,Bar2>(foos) --two errors
+
+  Foo<Z,X> implements Op< Bar<Z,X> >
+
+  local opList = OpList.new<Foo2,Bar2>(foos) --one error
+
+  Bar<A,B> implements Op< Foo<A,B> >
+
+  local opList = OpList.new<Foo2,Bar2>(foos) --no errors
+end
+
 local opList = OpList.new<Foo2,Bar2>(foos) --two errors
-
-Foo<Z,X> implements Op< Bar<Z,X> >
-
-local opList = OpList.new<Foo2,Bar2>(foos) --one error
-
-Bar<A,B> implements Op< Foo<A,B> >
-
-local opList = OpList.new<Foo2,Bar2>(foos) --no errors
-
 
 

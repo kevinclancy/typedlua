@@ -1,5 +1,5 @@
 
-interface IComparable<-T>
+shape IComparable<-T>
   --returns true if self is less than or equal to argument
   method leq : (T) => (boolean)
 end
@@ -32,6 +32,7 @@ local function quicksort< X <: IComparable<X> >(x : {X})
   
     --index after the contiguous chunk of all values 
     --encountered so far that are less than the pivot
+    
     local z = lo
   
     for i=2,#x do
@@ -53,7 +54,7 @@ local function quicksort< X <: IComparable<X> >(x : {X})
   
   local function sort(lo : integer, hi : integer)
     if hi - lo <= 1 then
-      return
+      return nil
     end
     
     local p = partition(lo, hi)
@@ -92,6 +93,10 @@ class CompanyBuildings extends ComparablePair<Factory,Office>
   constructor new(f : Factory, o : Office)
     super.new(f,o)
   end
+end
+
+local function barf(x : IComparable<Office>)
+
 end
 
 local f = class(Factory)

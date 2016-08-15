@@ -1,6 +1,4 @@
 
-
-
 class First
   constructor new()
   end
@@ -16,3 +14,7 @@ and class Third< X <: Second<First> > --bounds can't reference types from same b
   end
 end
 
+and class Fourth extends Second<First> --neither can inheritance clauses
+  constructor new()
+  end
+end

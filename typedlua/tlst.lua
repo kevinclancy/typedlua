@@ -50,8 +50,8 @@ function tlst.typeinfo_Structural (t)
 end
 
 -- (string,type,{tpar}) -> (typeinfo)
-function tlst.typeinfo_Nominal (name, t, tpars, is_class)
-  return { tag = "TINominal", name = name, class = is_class, [1] = t, [2] = tpars }
+function tlst.typeinfo_Nominal (name, t, tpars, is_shape)
+  return { tag = "TINominal", name = name, is_shape = is_shape, [1] = t, [2] = tpars }
 end
 
 -- (type) -> (typeinfo)
