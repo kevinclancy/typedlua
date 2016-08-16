@@ -13,11 +13,8 @@ function tlst.new_globalenv()
   local genv = {}
   genv.class_types = {}
   genv.types = {}
-  --maps [typename1 .. str(i1)][typename2 .. str(i2)] to edge info,
-  --as described in On Decidability of Nominal Subtyping with Variance, 
-  --section 5.2, where i1 is the index of a parameter of typename1
-  --and i2 is the index of a parameter of typename2
-  genv.param_graph = {}
+  -- a material graph (shape edges excluded) as described in "Getting F-Bounded Polymorphism into Shape"
+  genv.material_graph = {}
   genv.nominal_edges = {}
   genv.nominal_children = {}  
   genv.loaded = {}
@@ -66,8 +63,6 @@ function tlst.typeinfo_Variable (tbound, variance, name)
   return { tag = "TIVariable", [1] = tbound, [2] = variance, [3] = name }
 end
 
-
-
 -- appends all the children of the nominal type typename onto the end of
 -- children_out
 -- (env, string, {string}) -> ()
@@ -86,26 +81,6 @@ function tlst.get_nominal_children (env, typename, children_out)
       children_out[#children_out + 1] = descendant
     end    
   end    
-end
-
-function tlst.get_param_successors(env, param_id)
-  local scope = env.scope
-  local successors = {}
-  for s = scope, 1, -1 do
-    local scope_successors = env[s].param_graph[param_id] 
-    if scope_successors then
-      for _,successor in ipairs(scope_successors) do
-        successors[#successors + 1] = successor
-      end
-    end
-  end  
-  local global_successors = env.genv.param_graph[param_id]
-  if global_successors and #global_successors > 0 then
-    for _,successor in pairs(global_successors) do
-      successors[#successors + 1] = successors
-    end    
-  end     
-  return successors
 end
 
 -- returns an array of all of the nominal descendants of typename, inclusive
@@ -178,9 +153,30 @@ function tlst.get_nominal_edges (env, source, dest, array_out)
   end
 end
 
+-- (env,string) -> ({string})
+function tlst.get_material_successors(env, typename)
+  local scope = env.scope
+  local successors = {}
+  for s = scope, 1, -1 do
+    local scope_successors = env[s].material_graph[typename] 
+    if scope_successors then
+      for _,successor in ipairs(scope_successors) do
+        successors[#successors + 1] = successor
+      end
+    end
+  end  
+  local global_successors = env.genv.material_graph[typename]
+  if global_successors and #global_successors > 0 then
+    for _,successor in pairs(global_successors) do
+      successors[#successors + 1] = successors
+    end    
+  end     
+  return successors
+end
+
 -- insert a group of type variables into the environment
 -- set_tpars : (env, {tpar}) -> ()
-function tlst.set_tpars(env, tpars)
+function tlst.set_tpars (env, tpars)
   for _,tpar in ipairs(tpars) do
     local name, variance, tbound = tpar[1], tpar[2], tpar[3]
     local ti = tlst.typeinfo_Variable(tbound, variance, name)
@@ -189,7 +185,7 @@ function tlst.set_tpars(env, tpars)
   end  
 end
 
-local function nominal_edge_string(env, source, dest, instantiation)
+local function nominal_edge_string (env, source, dest, instantiation)
   local ti_source = tlst.get_typeinfo(env,source)
   local ti_dest = tlst.get_typeinfo(env,dest)
   assert(ti_source ~= nil and ti_source.tag == "TINominal")
@@ -197,7 +193,9 @@ local function nominal_edge_string(env, source, dest, instantiation)
   
   local ret = tlutils.abbreviate(source)
   local source_par_names = tlast.param_names(ti_source[2])
-  ret = ret .. '<' .. table.concat(source_par_names, ',') .. '>'
+  if #source_par_names > 0 then
+    ret = ret .. '<' .. table.concat(source_par_names, ',') .. '>'
+  end
   
   local instantiation_strings = {}
   for i,t in ipairs(instantiation) do
@@ -205,19 +203,19 @@ local function nominal_edge_string(env, source, dest, instantiation)
   end
   
   ret = ret .. ' <: ' .. tlutils.abbreviate(dest) 
-  ret = ret .. '<' .. table.concat(instantiation_strings, ',') .. '>'
-
+  if #instantiation_strings > 0 then
+    ret = ret .. '<' .. table.concat(instantiation_strings, ',') .. '>'
+  end
+  
   return ret
 end
 
--- adds all param graph edges (See On Decidability of Nominal Subtyping 
--- with Variance by Kennedy and Pierce, section 5.2) associated with the 
--- supplied nominal subtyping edge
+-- adds all material graph edges (See Getting F-Bounded Polymorphism into Shape by Greenman et. al.) 
+-- associated with the supplied nominal subtyping edge
 --
--- returns an array of {src_param, dest_param, expansive} pairs for all edges added, where
--- src_param and dest_param are strings formatted as type_name@param_name, and
--- expansive is a boolean
-local function add_param_edges (env, source, dest, instantiation, is_local)
+-- returns an array of all edges { "from" : typename, "to" : typename, "edge_str" : string }
+-- where from and to take on the names of materials, and edge_str describes a nominal subtyping edge
+local function add_material_edges (env, source, dest, instantiation, is_local)
   local senv = is_local and env[env.scope] or env.genv
   local ti_source = tlst.get_typeinfo(env,source)
   local ti_dest = tlst.get_typeinfo(env,dest)
@@ -230,99 +228,76 @@ local function add_param_edges (env, source, dest, instantiation, is_local)
   local edges_added = {}
   local src_par_names = tlast.param_names(ti_source[2])
   local dest_par_names = tlast.param_names(ti_dest[2])
-  
   local edge_str = nominal_edge_string(env, source, dest, instantiation)
-  
   tlst.begin_scope(env) --tpars
   tlst.set_tpars(env, ti_source[2])
-  
-  -- adding expansive edges for each variable occurrence in t
-  local function traverse(dest_par_name, t, param_context)
+  local function traverse(dest_par_name, t)
     if t.tag == "TSymbol" then
       local ti = tlst.get_typeinfo(env, t[1])
-      if ti.tag == "TIVariable" then
-        local src_par_name = t[1]
-        local src_par_id = source .. '@' .. src_par_name
-        for i,dest_par_id in ipairs(param_context) do
-          senv.param_graph[src_par_id] = senv.param_graph[src_par_id] or {} 
-          local source_edges = senv.param_graph[src_par_id]
-          source_edges[#source_edges + 1] = {
-            from = src_par_id,
-            to = dest_par_id,
-            -- a description of the implements clause that created this edge
-            edge_str = edge_str, 
-            -- whether or not this edge is expansive
-            expansive = (i ~= #param_context)
-          }
-          edges_added[#edges_added + 1] = { src_par_id, dest_par_id, false } 
-        end
+      --note: we draw an edge to all materials occuring in t
+      --this is overly conservative, as only the ones which are applied
+      --to types containing variable occurrences will lead to unbounded growth
+      if ti.tag == "TINominal" then
+        senv.material_graph[source] = senv.material_graph[source] or {} 
+        local source_edges = senv.material_graph[source]
+        local new_edge = {
+          from = source,
+          to = t[1],
+          edge_str = edge_str, 
+        }
+        source_edges[#source_edges + 1] = new_edge
+        edges_added[#edges_added + 1] = new_edge
       end
       for i,s in ipairs(t[2]) do
-        param_context[#param_context + 1] = t[1] .. '@' .. ti[2][i][1]
-        traverse(dest_par_name, s, param_context)
-        param_context[#param_context] = nil
+        traverse(dest_par_name, s)
       end
     end
   end
-  
-  local param_context = {}
-  for i,tinst in ipairs(instantiation) do
-    param_context[#param_context + 1] = dest .. '@' .. ti_dest[2][i][1]
-    traverse(dest_par_names[i], tinst, param_context)
-    param_context[#param_context] = nil
-  end
-  
-  tlst.end_scope(env) 
+  traverse(dest_par_names[i], tltype.Symbol(dest, instantiation))
+  tlst.end_scope(env) --tpars 
   return edges_added
 end
 
 -- return true if adding all param graph edges from the implements 
 -- clause (source, dest, instantiation) creates an expansive cycle
-local function check_param_cycles (env, source, dest, instantiation)
+local function check_material_cycles (env, source, dest, instantiation)
   tlst.begin_scope(env)
   
   local senv = env[env.scope]
-  local edges_added = add_param_edges(env, source, dest, instantiation, true)
+  local edges_added = add_material_edges(env, source, dest, instantiation, true)
 
   for _,edge in ipairs(edges_added) do
-    local src_id, dest_id, expansive = edge[1], edge[2], edge[3]
-    -- the set of all params that can be reached from dest 
-    local dest_descendants = {}
-    -- the set of all params that can be reached from dest via an expansive edge
-    local dest_descendants_expansive = {}
-    -- maps a param id to its parent edge in the dest param's dfs tree
-    local dest_dfs_parent = {}
-    local function traverse(expansive, param_id, parent_edge)
-      if not expansive and dest_descendants[param_id] then
-        return
-      elseif expansive and dest_descendants_expansive[param_id] then
+    --material edge a -> b
+    local a, b = edge.from, edge.to
+    -- the set of all materials that can be transitively produced from b
+    local b_descendants = {}
+    --parents in the dfs tree rooted at b 
+    local b_dfs_parent = {}
+    local function traverse(material, parent_edge)
+      if b_descendants[material] then
         return
       end
-      dest_descendants[param_id] = true
-      if expansive then
-        dest_descendants_expansive[param_id] = true
-      end
-      dest_dfs_parent[param_id] = parent_edge      
-      local edges = tlst.get_param_successors(env, param_id)
+      b_descendants[material] = true
+      b_dfs_parent[material] = parent_edge      
+      local edges = tlst.get_material_successors(env, material)
       for _,edge in ipairs(edges) do
-        traverse(expansive or edge.expansive, edge.to, edge)
+        traverse(edge.to, edge)
       end
     end
-   
-    traverse(expansive, dest_id, edge)
+    traverse(b, edge)
     
-    if dest_descendants_expansive[src_id] then
+    if b_descendants[a] then
       local ind = "  "
-      local curr_node = src_id
+      local curr_node = a
       local param_edge_strings = {}
       repeat
-        local edge_str = dest_dfs_parent[curr_node].edge_str
-        local parent_node = dest_dfs_parent[curr_node].from
-        param_edge_strings[#param_edge_strings + 1] = curr_node .. " -> " .. parent_node .. " from " .. dest_dfs_parent[curr_node].edge_str
+        local edge_str = b_dfs_parent[curr_node].edge_str
+        local parent_node = b_dfs_parent[curr_node].from
+        param_edge_strings[#param_edge_strings + 1] = curr_node .. " -> " .. parent_node .. " from " .. edge_str
         curr_node = parent_node
-      until (curr_node == dest_id)
+      until (curr_node == b)
       
-      local msg = "cannot add subtyping edge: expansive type parameter cycle has been detected"      
+      local msg = "adding this subtyping edge would create the following material cycle:"      
       for i=#param_edge_strings,1,-1 do
         msg = msg .. "\n" .. ind .. param_edge_strings[i]
       end
@@ -334,7 +309,6 @@ local function check_param_cycles (env, source, dest, instantiation)
   tlst.end_scope(env)
   return true
 end
-
 
 -- adds edge and returns true if no cycles are detected. returns false, 
 -- error message without adding edges otherwise
@@ -398,13 +372,13 @@ function tlst.add_nominal_edge (env, source, dest, instantiation, subst, is_loca
   end
   
   if not ti_dest.is_shape then
-    local succ, msg = check_param_cycles(env, source, dest, instantiation)
+    local succ, msg = check_material_cycles(env, source, dest, instantiation)
     if not succ then
       return false, msg
     end
+    
+    add_material_edges(env, source, dest, instantiation)
   end
-  
-  add_param_edges(env, source, dest, instantiation)
   
   local source_param_names = tlast.param_names(source_params)
   local dest_param_names = tlast.param_names(dest_params)
@@ -526,13 +500,9 @@ local function new_scope ()
   --class types
   senv.class_types = {}
   senv.type_aliases = {}
-  --maps [typename1 .. str(i1)][typename2 .. str(i2)] to edge info,
-  --as described in On Decidability of Nominal Subtyping with Variance, 
-  --section 5.2, where i1 is the index of a parameter of typename1
-  --and i2 is the index of a parameter of typename2
-  senv.param_graph = {}
-  --transpose of param_graph
-  senv.param_graph_trans = {} 
+  --A material graph (shape edges excluded) as described by "Getting 
+  --F-Bounded Polymorphism into Shape"
+  senv.material_graph = {}
   senv.nominal_edges = {}
   senv.nominal_children = {}
   return senv

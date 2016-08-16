@@ -3,7 +3,7 @@ interface IEq<-T>
   method eq : (T) => (boolean)
 end
 
-class Number implements IEq<Number>
+class Number implements IEq<Number> --creates a material cycle, since IEq is not a shape
   const val : number
   
   constructor new(val : number)

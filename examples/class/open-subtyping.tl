@@ -52,11 +52,11 @@ local foos : {Foo2} = {}
 do
   local opList = OpList.new<Foo2,Bar2>(foos) --two errors
 
-  Foo<Z,X> implements Op< Bar<Z,X> >
+  Foo<Z,X> implements IOp< Bar<Z,X> >
 
   local opList = OpList.new<Foo2,Bar2>(foos) --one error
 
-  Bar<A,B> implements Op< Foo<A,B> >
+  Bar<A,B> implements IOp< Foo<A,B> >
 
   local opList = OpList.new<Foo2,Bar2>(foos) --no errors
 end

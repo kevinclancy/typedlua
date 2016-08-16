@@ -95,10 +95,6 @@ class CompanyBuildings extends ComparablePair<Factory,Office>
   end
 end
 
-local function barf(x : IComparable<Office>)
-
-end
-
 local f = class(Factory)
 local o = class(Office)
 local cb = class(CompanyBuildings)
