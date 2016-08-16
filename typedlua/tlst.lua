@@ -297,7 +297,7 @@ local function check_material_cycles (env, source, dest, instantiation)
         curr_node = parent_node
       until (curr_node == b)
       
-      local msg = "adding this subtyping edge would create the following material cycle:"      
+      local msg = "adding this subtyping edge would create the following type cycle:"      
       for i=#param_edge_strings,1,-1 do
         msg = msg .. "\n" .. ind .. param_edge_strings[i]
       end
