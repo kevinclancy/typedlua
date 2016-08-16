@@ -1,5 +1,5 @@
 
-shape IEq<-T>
+interface IEq<-T>
   method eq : (T) => (boolean)
 end
 
@@ -15,11 +15,13 @@ class Number implements IEq<Number>
   end
 end
 
-class Pair<A <: IEq<A>, B <: IEq<B>> implements IEq< Pair<A, B> >
+--the following implements clause creates an expansive param cycle and therefore generates
+--an error
+class Pair<+A, +B> implements IEq< Pair< IEq<A>, IEq<B> > >
   const a : A
   const b : B
   
-  method eq(other : Pair<A, B>) : boolean
+  method eq(other : Pair< IEq<A>, IEq<B> >) : boolean
     return other.a:eq(self.a) and other.b:eq(self.b)
   end
   
@@ -28,28 +30,3 @@ class Pair<A <: IEq<A>, B <: IEq<B>> implements IEq< Pair<A, B> >
     self.b = b
   end
 end
-
-class Noncomp
-  constructor new() end
-end
-
-local function CompareThese< T <: IEq<T> >(x : T, y : T)
-  return x:eq(y)
-end
-
-local function crashMyProgram(x : IEq< Pair< IEq<Number>, IEq<Number> > >) --error
-  return 0
-end
-
-local one = class(Number).new(1)
-local two = Number.new(2)
-local p = class(Pair).new<Number, Number>(one,two)
-local r = Pair.new<Number, Number>(two,two)
-local nc = class(Noncomp)
-local q = class(Pair).new<Noncomp, Noncomp>(nc.new(), nc.new()) --2 errors
-
-crashMyProgram(p)
-
-print(p:eq(r))
-print( CompareThese< Pair<Number,Number> >(p, p) ) --this works
-print( CompareThese< Pair<Noncomp,Noncomp> >(q, q) ) --2 errors

@@ -5,12 +5,19 @@ This module implements Typed Lua symbol table.
 local tlst = {}
 
 local tlutils = require "typedlua.tlutils"
+local tlast = require "typedlua.tlast"
+local tltype = require "typedlua.tltype"
 
 -- new_globalenv 
 function tlst.new_globalenv()
   local genv = {}
   genv.class_types = {}
   genv.types = {}
+  --maps [typename1 .. str(i1)][typename2 .. str(i2)] to edge info,
+  --as described in On Decidability of Nominal Subtyping with Variance, 
+  --section 5.2, where i1 is the index of a parameter of typename1
+  --and i2 is the index of a parameter of typename2
+  genv.param_graph = {}
   genv.nominal_edges = {}
   genv.nominal_children = {}  
   genv.loaded = {}
@@ -79,6 +86,26 @@ function tlst.get_nominal_children (env, typename, children_out)
       children_out[#children_out + 1] = descendant
     end    
   end    
+end
+
+function tlst.get_param_successors(env, param_id)
+  local scope = env.scope
+  local successors = {}
+  for s = scope, 1, -1 do
+    local scope_successors = env[s].param_graph[param_id] 
+    if scope_successors then
+      for _,successor in ipairs(scope_successors) do
+        successors[#successors + 1] = successor
+      end
+    end
+  end  
+  local global_successors = env.genv.param_graph[param_id]
+  if global_successors and #global_successors > 0 then
+    for _,successor in pairs(global_successors) do
+      successors[#successors + 1] = successors
+    end    
+  end     
+  return successors
 end
 
 -- returns an array of all of the nominal descendants of typename, inclusive
@@ -151,6 +178,164 @@ function tlst.get_nominal_edges (env, source, dest, array_out)
   end
 end
 
+-- insert a group of type variables into the environment
+-- set_tpars : (env, {tpar}) -> ()
+function tlst.set_tpars(env, tpars)
+  for _,tpar in ipairs(tpars) do
+    local name, variance, tbound = tpar[1], tpar[2], tpar[3]
+    local ti = tlst.typeinfo_Variable(tbound, variance, name)
+    tlst.set_typeinfo(env, name, ti, true)
+    tlst.set_typealias(env, name, name)
+  end  
+end
+
+local function nominal_edge_string(env, source, dest, instantiation)
+  local ti_source = tlst.get_typeinfo(env,source)
+  local ti_dest = tlst.get_typeinfo(env,dest)
+  assert(ti_source ~= nil and ti_source.tag == "TINominal")
+  assert(ti_dest ~= nil and ti_dest.tag == "TINominal")
+  
+  local ret = tlutils.abbreviate(source)
+  local source_par_names = tlast.param_names(ti_source[2])
+  ret = ret .. '<' .. table.concat(source_par_names, ',') .. '>'
+  
+  local instantiation_strings = {}
+  for i,t in ipairs(instantiation) do
+    instantiation_strings[#instantiation_strings + 1] = tltype.tostring(instantiation[i])
+  end
+  
+  ret = ret .. ' <: ' .. tlutils.abbreviate(dest) 
+  ret = ret .. '<' .. table.concat(instantiation_strings, ',') .. '>'
+
+  return ret
+end
+
+-- adds all param graph edges (See On Decidability of Nominal Subtyping 
+-- with Variance by Kennedy and Pierce, section 5.2) associated with the 
+-- supplied nominal subtyping edge
+--
+-- returns an array of {src_param, dest_param, expansive} pairs for all edges added, where
+-- src_param and dest_param are strings formatted as type_name@param_name, and
+-- expansive is a boolean
+local function add_param_edges (env, source, dest, instantiation, is_local)
+  local senv = is_local and env[env.scope] or env.genv
+  local ti_source = tlst.get_typeinfo(env,source)
+  local ti_dest = tlst.get_typeinfo(env,dest)
+  if ti_dest.is_shape then 
+    return {} 
+  end
+  assert(ti_dest ~= nil and ti_dest.tag == "TINominal")
+  assert(not ti_source.is_shape)
+  assert(not ti_dest.is_shape)
+  local edges_added = {}
+  local src_par_names = tlast.param_names(ti_source[2])
+  local dest_par_names = tlast.param_names(ti_dest[2])
+  
+  local edge_str = nominal_edge_string(env, source, dest, instantiation)
+  
+  tlst.begin_scope(env) --tpars
+  tlst.set_tpars(env, ti_source[2])
+  
+  -- adding expansive edges for each variable occurrence in t
+  local function traverse(dest_par_name, t, param_context)
+    if t.tag == "TSymbol" then
+      local ti = tlst.get_typeinfo(env, t[1])
+      if ti.tag == "TIVariable" then
+        local src_par_name = t[1]
+        local src_par_id = source .. '@' .. src_par_name
+        for i,dest_par_id in ipairs(param_context) do
+          senv.param_graph[src_par_id] = senv.param_graph[src_par_id] or {} 
+          local source_edges = senv.param_graph[src_par_id]
+          source_edges[#source_edges + 1] = {
+            from = src_par_id,
+            to = dest_par_id,
+            -- a description of the implements clause that created this edge
+            edge_str = edge_str, 
+            -- whether or not this edge is expansive
+            expansive = (i ~= #param_context)
+          }
+          edges_added[#edges_added + 1] = { src_par_id, dest_par_id, false } 
+        end
+      end
+      for i,s in ipairs(t[2]) do
+        param_context[#param_context + 1] = t[1] .. '@' .. ti[2][i][1]
+        traverse(dest_par_name, s, param_context)
+        param_context[#param_context] = nil
+      end
+    end
+  end
+  
+  local param_context = {}
+  for i,tinst in ipairs(instantiation) do
+    param_context[#param_context + 1] = dest .. '@' .. ti_dest[2][i][1]
+    traverse(dest_par_names[i], tinst, param_context)
+    param_context[#param_context] = nil
+  end
+  
+  tlst.end_scope(env) 
+  return edges_added
+end
+
+-- return true if adding all param graph edges from the implements 
+-- clause (source, dest, instantiation) creates an expansive cycle
+local function check_param_cycles (env, source, dest, instantiation)
+  tlst.begin_scope(env)
+  
+  local senv = env[env.scope]
+  local edges_added = add_param_edges(env, source, dest, instantiation, true)
+
+  for _,edge in ipairs(edges_added) do
+    local src_id, dest_id, expansive = edge[1], edge[2], edge[3]
+    -- the set of all params that can be reached from dest 
+    local dest_descendants = {}
+    -- the set of all params that can be reached from dest via an expansive edge
+    local dest_descendants_expansive = {}
+    -- maps a param id to its parent edge in the dest param's dfs tree
+    local dest_dfs_parent = {}
+    local function traverse(expansive, param_id, parent_edge)
+      if not expansive and dest_descendants[param_id] then
+        return
+      elseif expansive and dest_descendants_expansive[param_id] then
+        return
+      end
+      dest_descendants[param_id] = true
+      if expansive then
+        dest_descendants_expansive[param_id] = true
+      end
+      dest_dfs_parent[param_id] = parent_edge      
+      local edges = tlst.get_param_successors(env, param_id)
+      for _,edge in ipairs(edges) do
+        traverse(expansive or edge.expansive, edge.to, edge)
+      end
+    end
+   
+    traverse(expansive, dest_id, edge)
+    
+    if dest_descendants_expansive[src_id] then
+      local ind = "  "
+      local curr_node = src_id
+      local param_edge_strings = {}
+      repeat
+        local edge_str = dest_dfs_parent[curr_node].edge_str
+        local parent_node = dest_dfs_parent[curr_node].from
+        param_edge_strings[#param_edge_strings + 1] = curr_node .. " -> " .. parent_node .. " from " .. dest_dfs_parent[curr_node].edge_str
+        curr_node = parent_node
+      until (curr_node == dest_id)
+      
+      local msg = "cannot add subtyping edge: expansive type parameter cycle has been detected"      
+      for i=#param_edge_strings,1,-1 do
+        msg = msg .. "\n" .. ind .. param_edge_strings[i]
+      end
+      tlst.end_scope(env)
+      return false, msg
+    end
+  end
+  
+  tlst.end_scope(env)
+  return true
+end
+
+
 -- adds edge and returns true if no cycles are detected. returns false, 
 -- error message without adding edges otherwise
 -- (env, string, string, {type}, (type, string, type) -> (type)) -> (boolean)
@@ -162,14 +347,11 @@ function tlst.add_nominal_edge (env, source, dest, instantiation, subst, is_loca
   local source_params = ti_source[2]
   local dest_params = ti_dest[2]
   assert(#instantiation == #dest_params)
-  
+  local edge_str = nominal_edge_string(env, source, dest, instantiation)
   local dest_ancestors = {}
   tlst.get_all_nominal_edges(env, dest, dest_ancestors)
-  
   local senv = is_local and env[env.scope] or env.genv
-  
   local nominal_edges = senv.nominal_edges
-    
   local source_descendants = tlst.get_nominal_descendants(env, source)
   
   --check for trivial cycles
@@ -215,15 +397,17 @@ function tlst.add_nominal_edge (env, source, dest, instantiation, subst, is_loca
     end
   end
   
-  local source_param_names = {}
-  for k,v in ipairs(source_params) do
-    source_param_names[#source_param_names + 1] = v[1]
+  if not ti_dest.is_shape then
+    local succ, msg = check_param_cycles(env, source, dest, instantiation)
+    if not succ then
+      return false, msg
+    end
   end
   
-  local dest_param_names = {}
-  for k,v in ipairs(dest_params) do
-    dest_param_names[#dest_param_names + 1] = v[1]
-  end
+  add_param_edges(env, source, dest, instantiation)
+  
+  local source_param_names = tlast.param_names(source_params)
+  local dest_param_names = tlast.param_names(dest_params)
   
   for descendant,_ in pairs(source_descendants) do
     local desc_src_edges = {}
@@ -342,6 +526,13 @@ local function new_scope ()
   --class types
   senv.class_types = {}
   senv.type_aliases = {}
+  --maps [typename1 .. str(i1)][typename2 .. str(i2)] to edge info,
+  --as described in On Decidability of Nominal Subtyping with Variance, 
+  --section 5.2, where i1 is the index of a parameter of typename1
+  --and i2 is the index of a parameter of typename2
+  senv.param_graph = {}
+  --transpose of param_graph
+  senv.param_graph_trans = {} 
   senv.nominal_edges = {}
   senv.nominal_children = {}
   return senv

@@ -301,6 +301,15 @@ function tlast.tpar (pos, variance, str, tbound)
   return { tag = "TypeParam", pos = pos, [1] = str, [2] = variance, [3] = tbound or valueType }
 end
 
+-- tpar : ({tpar}) -> ({string})
+function tlast.param_names (tpars)
+  local ret = {}
+  for _,tpar in ipairs(tpars) do
+    ret[#ret + 1] = tpar[1]
+  end
+  return ret
+end
+
 -- fieldlist
 
 -- fieldPair : (number, expr, expr) -> (field)

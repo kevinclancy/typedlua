@@ -12,6 +12,7 @@ local tltype = require "typedlua.tltype"
 local tlparser = require "typedlua.tlparser"
 local tldparser = require "typedlua.tldparser"
 local tlutils = require "typedlua.tlutils"
+local tlsubtype = require "typedlua.tlsubtype"
 
 local Value = tltype.Value()
 local Any = tltype.Any()
@@ -40,7 +41,7 @@ local function typeerror (env, tag, msg, pos)
 end
 
 local function set_type (env, node, t)
-  node["type"] = tltype.simplifyUnion(env,t)
+  node["type"] = tlsubtype.simplifyUnion(env,t)
 end
 
 local function get_type (node)
@@ -78,18 +79,6 @@ local function expand_typealias(env, t)
   if s then
     t[1] = s
   end
-end
-
--- insert a group of type variables into the environment
--- set_tpars : (env, {tpar}) -> ()
-local function set_tpars(env, tpars)
-  for _,tpar in ipairs(tpars) do
-    local name, variance, tbound = tpar[1], tpar[2], tpar[3]
-    tbound = (tbound == "NoBound") and Value or tbound
-    local ti = tlst.typeinfo_Variable(tbound, variance, name)
-    tlst.set_typeinfo(env, name, ti, true)
-    tlst.set_typealias(env, name, name)
-  end  
 end
 
 --kindchecks for proper arity, and also that all symbols are defined
@@ -415,7 +404,7 @@ local function kindcheck_bounds (env, t, context)
           local bound = tpar[3] 
           if bound ~= "NoBound" then
             bound = tltype.substitutes(bound, names, args)
-            local succ, explanation = tltype.consistent_subtype(env, args[i], bound) 
+            local succ, explanation = tlsubtype.consistent_subtype(env, args[i], bound) 
             if not succ then
               local msg = string.format("%s is not a subtype of %s", tltype.tostring(args[i]), tltype.tostring(bound))
               typeerror(env, "kind", msg .. "\n" .. explanation, args[i].pos)
@@ -441,7 +430,7 @@ end
 local function kindcheck_tpars(env, tpars, bundle_typenames)
   local context = { tag = "Bound", desc = "type parameter bound", bundle_typenames = bundle_typenames or {}}
   tlst.begin_scope(env)
-  set_tpars(env, tpars)
+  tlst.set_tpars(env, tpars)
   
   --kindcheck the arity of bounds, as well as whether the typenames occuring
   --in them have been defined (but don't check subtyping constraints, which might not be well-kinded)
@@ -754,14 +743,14 @@ local function check_arith (env, exp, op)
   check_exp(env, exp2)
   local t1, t2 = tltype.first(get_type(exp1)), tltype.first(get_type(exp2))
   local msg = "attempt to perform arithmetic on a '%s'"
-  if tltype.subtype(env, t1, tltype.Integer(true)) and
-     tltype.subtype(env, t2, tltype.Integer(true)) then
+  if tlsubtype.subtype(env, t1, tltype.Integer(true)) and
+     tlsubtype.subtype(env, t2, tltype.Integer(true)) then
     if op == "div" or op == "pow" then
       set_type(env, exp, Number)
     else
       set_type(env, exp, Integer)
     end
-  elseif tltype.subtype(env, t1, Number) and tltype.subtype(env, t2, Number) then
+  elseif tlsubtype.subtype(env, t1, Number) and tlsubtype.subtype(env, t2, Number) then
     set_type(env, exp, Number)
     if op == "idiv" then
       local msg = "integer division on floats"
@@ -778,7 +767,7 @@ local function check_arith (env, exp, op)
   else
     set_type(env, exp, Any)
     local wrong_type, wrong_pos = tltype.general(t1), exp1.pos
-    if tltype.subtype(env, t1, Number) or tltype.isAny(t1) then
+    if tlsubtype.subtype(env, t1, Number) or tltype.isAny(t1) then
       wrong_type, wrong_pos = tltype.general(t2), exp2.pos
     end
     msg = string.format(msg, tltype.tostring(wrong_type))
@@ -792,8 +781,8 @@ local function check_bitwise (env, exp, op)
   check_exp(env, exp2)
   local t1, t2 = tltype.first(get_type(exp1)), tltype.first(get_type(exp2))
   local msg = "attempt to perform bitwise on a '%s'"
-  if tltype.subtype(env, t1, tltype.Integer(true)) and
-     tltype.subtype(env, t2, tltype.Integer(true)) then
+  if tlsubtype.subtype(env, t1, tltype.Integer(true)) and
+     tlsubtype.subtype(env, t2, tltype.Integer(true)) then
     set_type(env, exp, Integer)
   elseif tltype.isAny(t1) then
     set_type(env, exp, Any)
@@ -806,7 +795,7 @@ local function check_bitwise (env, exp, op)
   else
     set_type(env, exp, Any)
     local wrong_type, wrong_pos = tltype.general(t1), exp1.pos
-    if tltype.subtype(env, t1, Number) or tltype.isAny(t1) then
+    if tlsubtype.subtype(env, t1, Number) or tltype.isAny(t1) then
       wrong_type, wrong_pos = tltype.general(t2), exp2.pos
     end
     msg = string.format(msg, tltype.tostring(wrong_type))
@@ -820,7 +809,7 @@ local function check_concat (env, exp)
   check_exp(env, exp2)
   local t1, t2 = tltype.first(get_type(exp1)), tltype.first(get_type(exp2))
   local msg = "attempt to concatenate a '%s'"
-  if tltype.subtype(env, t1, String) and tltype.subtype(env, t2, String) then
+  if tlsubtype.subtype(env, t1, String) and tlsubtype.subtype(env, t2, String) then
     set_type(env, exp, String)
   elseif tltype.isAny(t1) then
     set_type(exp, Any)
@@ -833,7 +822,7 @@ local function check_concat (env, exp)
   else
     set_type(env, exp, Any)
     local wrong_type, wrong_pos = tltype.general(t1), exp1.pos
-    if tltype.subtype(env, t1, String) or tltype.isAny(t1) then
+    if tlsubtype.subtype(env, t1, String) or tltype.isAny(t1) then
       wrong_type, wrong_pos = tltype.general(t2), exp2.pos
     end
     msg = string.format(msg, tltype.tostring(wrong_type))
@@ -854,9 +843,9 @@ local function check_order (env, exp)
   check_exp(env, exp2)
   local t1, t2 = tltype.first(get_type(exp1)), tltype.first(get_type(exp2))
   local msg = "attempt to compare '%s' with '%s'"
-  if tltype.subtype(env, t1, Number) and tltype.subtype(env, t2, Number) then
+  if tlsubtype.subtype(env, t1, Number) and tlsubtype.subtype(env, t2, Number) then
     set_type(env, exp, Boolean)
-  elseif tltype.subtype(env, t1, String) and tltype.subtype(env, t2, String) then
+  elseif tlsubtype.subtype(env, t1, String) and tlsubtype.subtype(env, t2, String) then
     set_type(exp, Boolean)
   elseif tltype.isAny(t1) then
     set_type(env, exp, Any)
@@ -943,7 +932,7 @@ local function check_bnot (env, exp)
   check_exp(env, exp1)
   local t1 = tltype.first(get_type(exp1))
   local msg = "attempt to perform bitwise on a '%s'"
-  if tltype.subtype(env, t1, tltype.Integer(true)) then
+  if tlsubtype.subtype(env, t1, tltype.Integer(true)) then
     set_type(env, exp, Integer)
   elseif tltype.isAny(t1) then
     set_type(env, exp, Any)
@@ -961,9 +950,9 @@ local function check_minus (env, exp)
   check_exp(env, exp1)
   local t1 = tltype.first(get_type(exp1))
   local msg = "attempt to perform arithmetic on a '%s'"
-  if tltype.subtype(env, t1, Integer) then
+  if tlsubtype.subtype(env, t1, Integer) then
     set_type(env, exp, Integer)
-  elseif tltype.subtype(env, t1, Number) then
+  elseif tlsubtype.subtype(env, t1, Number) then
     set_type(env, exp, Number)
   elseif tltype.isAny(t1) then
     set_type(env, exp, Any)
@@ -982,8 +971,8 @@ local function check_len (env, exp)
   check_exp(env, exp1)
   local t1 = tltype.first(get_type(exp1))
   local msg = "attempt to get length of a '%s'"
-  if tltype.subtype(env, t1, String) or
-     tltype.subtype(env, t1, tltype.Table()) then
+  if tlsubtype.subtype(env, t1, String) or
+     tlsubtype.subtype(env, t1, tltype.Table()) then
     set_type(env, exp, Integer)
   elseif tltype.isAny(t1) then
     set_type(env, exp, Any)
@@ -1038,10 +1027,10 @@ local function check_return_type (env, inf_type, dec_type, pos)
   if tltype.isUnionlist(dec_type) then
     dec_type = tltype.unionlist2tuple(dec_type)
   end
-  local sub_succ, sub_explanation = tltype.subtype(env, inf_type, dec_type)
+  local sub_succ, sub_explanation = tlsubtype.subtype(env, inf_type, dec_type)
   if sub_succ then
   else
-    local cs_succ, cs_explanation = tltype.consistent_subtype(env, inf_type, dec_type)
+    local cs_succ, cs_explanation = tlsubtype.consistent_subtype(env, inf_type, dec_type)
     if cs_succ then
       msg = string.format(msg, tltype.tostring(inf_type), tltype.tostring(dec_type))
       typeerror(env, "any", msg .. "\n" .. sub_explanation, pos)
@@ -1113,13 +1102,13 @@ local function check_table (env, exp)
       check_exp(env, exp1)
       check_exp(env, exp2)
       t1, t2 = get_type(exp1), tltype.general(get_type(exp2))
-      if tltype.subtype(env, Nil, t1) then
+      if tlsubtype.subtype(env, Nil, t1) then
         t1 = Any
         local msg = "table index can be nil"
         typeerror(env, "table", msg, exp1.pos)
-      elseif not (tltype.subtype(env, t1, Boolean) or
-                  tltype.subtype(env, t1, Number) or
-                  tltype.subtype(env, t1, String)) then
+      elseif not (tlsubtype.subtype(env, t1, Boolean) or
+                  tlsubtype.subtype(env, t1, Number) or
+                  tlsubtype.subtype(env, t1, String)) then
         t1 = Any
         local msg = "table index is dynamic"
         typeerror(env, "any", msg, exp1.pos)
@@ -1211,9 +1200,9 @@ end
 
 local function check_arguments (env, func_name, dec_type, infer_type, pos)
   local msg = "attempt to pass '%s' to %s of input type '%s'"
-  local sub_succ, sub_explanation = tltype.subtype(env, infer_type, dec_type) 
+  local sub_succ, sub_explanation = tlsubtype.subtype(env, infer_type, dec_type) 
   if not sub_succ then
-    local cs_succ, cs_explanation = tltype.consistent_subtype(env, infer_type, dec_type)
+    local cs_succ, cs_explanation = tlsubtype.consistent_subtype(env, infer_type, dec_type)
     if cs_succ then 
       msg = string.format(msg, tltype.tostring(infer_type), func_name, tltype.tostring(dec_type))
       msg = msg .. "\n" .. sub_explanation
@@ -1245,7 +1234,7 @@ local function check_call (env, exp)
      #targs == 0 then
     if explist[1] and explist[2] then
       local t1, t2 = get_type(explist[1]), get_type(explist[2])
-      local t3 = tltype.getField(env, tltype.Literal("__index"), t2)
+      local t3 = tlsubtype.getField(env, tltype.Literal("__index"), t2)
       if not tltype.isNil(t3) then
         if tltype.isTable(t3) then t3.open = true end
         set_type(env, exp, t3)
@@ -1308,7 +1297,7 @@ local function check_call (env, exp)
         for i,tparam in ipairs(tparams) do
           local name, variance = tparam[1], tparam[2]
           assert(variance == "Invariant")
-          local succ, explanation = tltype.consistent_subtype(env, targs[i], substituted_bounds[i])
+          local succ, explanation = tlsubtype.consistent_subtype(env, targs[i], substituted_bounds[i])
           if not succ then
             local msg = "type argument %s is not a subtype of bound %s"
             msg = string.format(msg, tltype.tostring(targs[i]), tltype.tostring(substituted_bounds[i]))
@@ -1346,11 +1335,11 @@ local function check_invoke (env, exp)
   check_exp(env, exp1)
   check_exp(env, exp2)
   check_explist(env, explist)
-  local t1, t2 = tltype.unfold(env, get_type(exp1)), get_type(exp2)
+  local t1, t2 = tlsubtype.unfold(env, get_type(exp1)), get_type(exp2)
   --TODO: maybe we need to unfold exp1.type for pseudo-method invocations
   if tltype.isTable(t1) then
     assert(tltype.isLiteral(t2) and type(t2[1]) == "string")
-    local tfield = tltype.getField(env, t2, t1)
+    local tfield = tlsubtype.getField(env, t2, t1)
     if tfield and tltype.isFunction(tfield) and tltype.isSelf(tfield[1][1]) then
       table.insert(explist, 1, { type = Self })
     else
@@ -1366,10 +1355,10 @@ local function check_invoke (env, exp)
     local inferred_type =  arglist2type(explist, env.strict)
     local t3
     if tltype.isTable(t1) then
-      t3 = tltype.getField(env, t2, t1)
+      t3 = tlsubtype.getField(env, t2, t1)
     else
       local string_userdata = env["loaded"]["string"] or tltype.Table()
-      t3 = tltype.getField(env, t2, string_userdata)
+      t3 = tlsubtype.getField(env, t2, string_userdata)
       inferred_type[1] = String
     end
     local msg = "attempt to call method '%s' of type '%s'"
@@ -1407,7 +1396,7 @@ local function check_superinvoke(env, exp)
     set_type(env, exp, Any)
     return
   end
-  local tsuperclass = tltype.unfold(env, tsuperclass_symbol)
+  local tsuperclass = tlsubtype.unfold(env, tsuperclass_symbol)
   local name_exp = exp[1]
   local explist = {}
   explist[1] = tlast.ident(0, "self")
@@ -1423,8 +1412,8 @@ local function check_superinvoke(env, exp)
     return false
   end
   
-  local tpremethods = tltype.getField(env, tltype.Literal("__premethods"), tsuperclass)
-  local tcalled_premethod = tltype.getField(env, tltype.Literal(name_exp[1]), tpremethods)
+  local tpremethods = tlsubtype.getField(env, tltype.Literal("__premethods"), tsuperclass)
+  local tcalled_premethod = tlsubtype.getField(env, tltype.Literal(name_exp[1]), tpremethods)
   if not tcalled_premethod then
     local msg = "superclass %s does not have a premethod called %s"
     msg = string.format(msg, tltype.tostring(tsuperclass), name_exp[1])
@@ -1475,12 +1464,12 @@ local function check_local_var (env, id, inferred_type, close_local)
   else
     check_self(env, local_type, local_type, pos)
     local msg = "attempt to assign '%s' to '%s'"
-    local local_type = tltype.unfold(env, local_type)
+    local local_type = tlsubtype.unfold(env, local_type)
     msg = string.format(msg, tltype.tostring(inferred_type), tltype.tostring(local_type))
-    local subtype_succ, subtype_expl = tltype.subtype(env, inferred_type, local_type)
+    local subtype_succ, subtype_expl = tlsubtype.subtype(env, inferred_type, local_type)
     if subtype_succ then
     else
-      local cs_succ, cs_expl = tltype.consistent_subtype(env, inferred_type, local_type)
+      local cs_succ, cs_expl = tlsubtype.consistent_subtype(env, inferred_type, local_type)
       if cs_succ then
         typeerror(env, "any", msg .. "\n" .. subtype_expl, pos)
       else
@@ -1547,7 +1536,7 @@ local function check_localrec (env, id, exp)
   tlst.begin_function(env) 
   tlst.begin_scope(env) --type parameters
   kindcheck_tpars(env, tpars)
-  set_tpars(env, tpars)
+  tlst.set_tpars(env, tpars)
   if (ret_type == false) or (not kindcheck(env, ret_type, false)) then
     ret_type = tltype.Tuple({Any}, true)
     exp[2] = ret_type
@@ -1645,10 +1634,10 @@ local function check_assignment (env, varlist, explist)
   table.insert(l, tltype.Vararg(Value))
   local var_type, exp_type = tltype.Tuple(l), explist2typelist(explist)
   local msg = "attempt to assign '%s' to '%s'"
-  local subtype_succ, subtype_expl = tltype.subtype(env, exp_type, var_type) 
+  local subtype_succ, subtype_expl = tlsubtype.subtype(env, exp_type, var_type) 
   if subtype_succ then
   else
-    local cs_succ, cs_expl = tltype.consistent_subtype(env, exp_type, var_type) 
+    local cs_succ, cs_expl = tlsubtype.consistent_subtype(env, exp_type, var_type) 
     if cs_succ then
       msg = string.format(msg, tltype.tostring(exp_type), tltype.tostring(var_type))
       typeerror(env, "any", msg .. "\n" .. subtype_expl, varlist[1].pos)
@@ -1666,7 +1655,7 @@ local function check_assignment (env, varlist, explist)
       if exp and exp.tag == "Op" and exp[1] == "or" and
          exp[2].tag == "Id" and exp[2][1] == name and not l.assigned then
         local t1, t2 = get_type(exp), get_type(l)
-        if tltype.subtype(env, t1, t2) then
+        if tlsubtype.subtype(env, t1, t2) then
           l.bkp = t2
           set_type(env, l, t1)
         end
@@ -1675,7 +1664,7 @@ local function check_assignment (env, varlist, explist)
     elseif tag == "Index" then
       local t1, t2 = get_type(v[1]), get_type(v[2])
       if tltype.isTable(t1) then
-        local field = tltype.getFieldTable(env, t2, t1)
+        local field = tlsubtype.getFieldTable(env, t2, t1)
         if field and field.missing then
           field.missing = nil
         end
@@ -1723,7 +1712,7 @@ end
 local function get_index (u, t, i)
   if tltype.isUnionlist(u) then
     for k, v in ipairs(u) do
-      if tltype.subtype(env, v[i], t) and tltype.subtype(env, t, v[i]) then
+      if tlsubtype.subtype(env, v[i], t) and tlsubtype.subtype(env, t, v[i]) then
         return k
       end
     end
@@ -1750,7 +1739,7 @@ local function check_if (env, stm)
         if not tltype.isUnionlist(get_type(var)) then
           if not var.bkp then var.bkp = get_type(var) end
           var.filter = Nil
-          set_type(env, var, tltype.filterUnion(env, get_type(var), Nil))
+          set_type(env, var, tlsubtype.filterUnion(env, get_type(var), Nil))
           l[name] = var
         else
           local idx = get_index(get_type(var), Nil, var.i)
@@ -1869,8 +1858,8 @@ local function check_fornum (env, stm)
   check_exp(env, exp1)
   local t1 = get_type(exp1)
   local msg = "'for' initial value must be a number"
-  if tltype.subtype(env, t1, Number) then
-  elseif tltype.consistent_subtype(env, t1, Number) then
+  if tlsubtype.subtype(env, t1, Number) then
+  elseif tlsubtype.consistent_subtype(env, t1, Number) then
     typeerror(env, "any", msg, exp1.pos)
   else
     typeerror(env, "fornum", msg, exp1.pos)
@@ -1878,8 +1867,8 @@ local function check_fornum (env, stm)
   check_exp(env, exp2)
   local t2 = get_type(exp2)
   msg = "'for' limit must be a number"
-  if tltype.subtype(env, t2, Number) then
-  elseif tltype.consistent_subtype(env, t2, Number) then
+  if tlsubtype.subtype(env, t2, Number) then
+  elseif tlsubtype.consistent_subtype(env, t2, Number) then
     typeerror(env, "any", msg, exp2.pos)
   else
     typeerror(env, "fornum", msg, exp2.pos)
@@ -1892,8 +1881,8 @@ local function check_fornum (env, stm)
     if not infer_int(t3) then
       int_step = false
     end
-    if tltype.subtype(env, t3, Number) then
-    elseif tltype.consistent_subtype(env, t3, Number) then
+    if tlsubtype.subtype(env, t3, Number) then
+    elseif tlsubtype.consistent_subtype(env, t3, Number) then
       typeerror(env, "any", msg, exp3.pos)
     else
       typeerror(env, "fornum", msg, exp3.pos)
@@ -1949,13 +1938,13 @@ local function check_index (env, exp)
   check_exp(env, exp1)
   check_exp(env, exp2)
   local t1, t2 = tltype.first(get_type(exp1)), tltype.first(get_type(exp2))
-  local t1 = t1 and tltype.unfold(env,t1)
+  local t1 = t1 and tlsubtype.unfold(env,t1)
   local msg = "attempt to index '%s' with '%s'"
   if tltype.isTable(t1) then
     -- FIX: methods should not leave objects, this is unsafe!
-    local field_type = tltype.getField(env, t2, t1)
+    local field_type = tlsubtype.getField(env, t2, t1)
     if not tltype.isNil(field_type) then
-      local field = tltype.getFieldTable(env, t2, t1)
+      local field = tlsubtype.getFieldTable(env, t2, t1)
       if field.missing then
         msg = "attempt to access missing field %s"
         msg = string.format(msg, tltype.tostring(t2))
@@ -2073,7 +2062,7 @@ end
 
 -- check_constructor_supercall : (env, id, explist, type) -> ()
 local function check_constructor_supercall (env, supercons_name, super_args, tsuper_inst, tsuper_class)
-  local constructor = tltype.getField(env, tltype.Literal(supercons_name[1]), tsuper_class)
+  local constructor = tlsubtype.getField(env, tltype.Literal(supercons_name[1]), tsuper_class)
   
   if not constructor then
     local msg = "superclass constructor %s called, but superclass %s does not have a constructor with that name."
@@ -2242,14 +2231,14 @@ local function get_superclass_fields (env, tsuper)
   local superargs = tsuper[2]
   local tsuperclass = tlst.get_classtype(env, tsuper[1])
   assert(tsuperclass)
-  local premethods = tltype.getField(env, tltype.Literal("__premethods"), tsuperclass)
-  local t_superobject_def = tltype.unfold(env, tsuper)
+  local premethods = tlsubtype.getField(env, tltype.Literal("__premethods"), tsuperclass)
+  local t_superobject_def = tlsubtype.unfold(env, tsuper)
   
   local members = {}
   local methods = {}
   local fields = {}
   for _,field in ipairs(t_superobject_def) do
-    local premethod = tltype.getFieldTable(env, field[1], premethods)
+    local premethod = tlsubtype.getFieldTable(env, field[1], premethods)
     local fieldname = tltype.tostring(field[1])
     if premethod then
       methods[fieldname] = field
@@ -2535,7 +2524,7 @@ local function check_typebundle (env, stm)
       local tsuper = def[4]
       if tsuper ~= "NoParent" then
         tlst.begin_scope(env) --check inheritance clause
-        set_tpars(env, def[5])
+        tlst.set_tpars(env, def[5])
         local context = { 
           tag = "Inheritance", 
           desc = "inheritance clause", 
@@ -2579,7 +2568,7 @@ local function check_typebundle (env, stm)
       tlst.begin_scope(env) -- type parameters for the class definition.
       local elems = def[3] 
       local tpars = (def.tag == "Class" and def[5]) or (def.tag == "Interface" and def[2])
-      set_tpars(env, tpars)
+      tlst.set_tpars(env, tpars)
       kindcheck_arity_class_elems(env, elems)
       tlst.end_scope(env)
     end
@@ -2646,7 +2635,7 @@ local function check_typebundle (env, stm)
         tlst.begin_scope(env) --check class methods covariant
         --insert type parameters
         local elems, tpars = def[3], def[5]
-        set_tpars(env, tpars)
+        tlst.set_tpars(env, tpars)
         --we need super elems
         local superclass_members, superclass_methods, superclass_fields = get_superclass_fields(env, tsuper)
             
@@ -2658,7 +2647,7 @@ local function check_typebundle (env, stm)
               local tmethod = make_tmethod(parlist,rettype)
               local tsuper_method = super_method[2]
               
-              if not tltype.consistent_subtype(env, tmethod, tsuper_method) then
+              if not tlsubtype.consistent_subtype(env, tmethod, tsuper_method) then
                 local msg = "method type %s of %s is not a subtype of super class method type %s"
                 msg = string.format(msg, tltype.tostring(tmethod), name, tltype.tostring(tsuper_method))
                 typeerror(env, "inheritance", msg, elem.pos)
@@ -2681,7 +2670,7 @@ local function check_typebundle (env, stm)
     if def.tag == "Class" then
       local name, elems, tsuper, tpars = def[1], def[3], def[4], def[5]
       tlst.begin_scope(env) -- class type parameters
-      set_tpars(env, tpars)
+      tlst.set_tpars(env, tpars)
       for _,elem in ipairs(elems) do
         if elem.tag == "ConcreteClassMethod" then
           local parlist, tret = elem[2], elem[3]
@@ -2701,7 +2690,7 @@ local function check_typebundle (env, stm)
     elseif def.tag == "Interface" then
       local name, tpars, elems = def[1], def[2], def[3]
       tlst.begin_scope(env) -- class type parameters
-      set_tpars(env, tpars)
+      tlst.set_tpars(env, tpars)
       for _,elem in ipairs(elems) do
         if elem.tag == "AbstractClassMethod" then
           local name, ty = elem[1], elem[2]
@@ -2725,7 +2714,7 @@ local function check_typebundle (env, stm)
     if def.tag == "Class" then
       tlst.begin_scope(env)
       local interfaces, tpars = def[6], def[5]
-      set_tpars(env, tpars)
+      tlst.set_tpars(env, tpars)
       local new_interfaces = {}
       local msg = "classes can only implement class and interface types, but %s is not one"
       for i,t in ipairs(interfaces) do
@@ -2755,11 +2744,11 @@ local function check_typebundle (env, stm)
       local name, tpars, interfaces = def[1], def[5], def[6]
       local typename = make_typename(env, name, is_local)
       tlst.begin_scope(env) --class type parameters
-      set_tpars(env, tpars)
+      tlst.set_tpars(env, tpars)
       local t_instance,_,_,_ = get_class_types(env, def, is_local)
       for i,t in ipairs(interfaces) do
         assert(t.tag == "TSymbol")
-        local succ, explanation = tltype.consistent_subtype(env, t_instance, tltype.unfold(env, t))
+        local succ, explanation = tlsubtype.consistent_subtype(env, t_instance, tlsubtype.unfold(env, t))
         if succ then
           env.scope = env.scope - 1 --add nominal edge to the scope above this class's scope
           local succ, msg =  tlst.add_nominal_edge(env, typename, t[1], t[2], tltype.substitutes, is_local)
@@ -2785,7 +2774,7 @@ local function check_typebundle (env, stm)
     if def.tag == "Class" then
       local elems, tsuper, tpars = def[3], def[4], def[5]
       tlst.begin_scope(env) --class type parameters
-      set_tpars(env, tpars)
+      tlst.set_tpars(env, tpars)
       for _,tpar in ipairs(tpars) do
         local name, variance, tbound = tpar[1], tpar[2], tpar[3]
         tbound = (tbound == "NoBound") and Value or tbound
@@ -2886,7 +2875,7 @@ local function check_implements (env, stm)
         [3] = tltype.substitutes(bound, ti1_param_names, params)
       }
     end
-    set_tpars(env, renamed_params)
+    tlst.set_tpars(env, renamed_params)
     
     if not kindcheck(env, t2, true) then
       tlst.end_scope(env) --type parameters
@@ -2936,11 +2925,11 @@ function check_var (env, var, exp)
     check_exp(env, exp1)
     check_exp(env, exp2)
     local t1, t2 = tltype.first(get_type(exp1)), tltype.first(get_type(exp2))
-    t1 = tltype.unfold(env, t1)
+    t1 = tlsubtype.unfold(env, t1)
     local msg = "attempt to index '%s' with '%s'"
     if tltype.isTable(t1) then
       if exp1.tag == "Id" and exp1[1] ~= "_ENV" then env.self = t1 end
-      local field_type = tltype.getField(env, t2, t1)
+      local field_type = tlsubtype.getField(env, t2, t1)
       if not tltype.isNil(field_type) then
         set_type(env, var, field_type)
       else
@@ -2949,7 +2938,7 @@ function check_var (env, var, exp)
             local t3 = tltype.general(get_type(exp))
             local t = tltype.general(t1)
             table.insert(t, tltype.Field(var.const, t2, t3))
-            if tltype.subtype(env, t, t1) then
+            if tlsubtype.subtype(env, t, t1) then
               table.insert(t1, tltype.Field(var.const, t2, t3))
             else
               msg = "could not include field '%s'"
