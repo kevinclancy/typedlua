@@ -1386,8 +1386,10 @@ local function check_invoke (env, exp)
   return false
 end
 
-local function check_superinvoke(env, exp)
+local function check_superinvoke (env, exp)
   local tsuperclass_symbol = tlst.get_tsuper(env)
+  local ti_superclass = tlst.get_typeinfo(env, tsuperclass_symbol[1])
+  assert(ti_superclass.tag == "TINominal")
   if tsuperclass_symbol == "None" then
     local msg = "tried to invoke superclass method in a class which has no superclass"
     typeerror(env, "superinvoke", msg, exp.pos) 
@@ -1395,6 +1397,12 @@ local function check_superinvoke(env, exp)
     return
   end
   local tsuperclass = tlst.get_classtype(env, tsuperclass_symbol[1])
+  tsuperclass_symbol = tlsubtype.unfold(env, tsuperclass_symbol)
+  if not tsuperclass then
+    local msg = "superclass invocations can only occur inside definitions of classes with superclasses"
+    typeerror(env, "superinvoke", msg, exp.pos)
+    return false
+  end  
   local name_exp = exp[1]
   local explist = {}
   explist[1] = tlast.ident(0, "self")
@@ -1404,22 +1412,18 @@ local function check_superinvoke(env, exp)
   check_exp(env, name_exp)
   assert(tltype.isStr(get_type(name_exp)))
   check_explist(env, explist)
-  if not tsuperclass then
-    local msg = "superclass invocations can only occur inside definitions of classes with superclasses"
-    typeerror(env, "superinvoke", msg, exp.pos)
-    return false
-  end
-  --TODO: substitute type args
-  local tpremethods = tlsubtype.getField(env, tltype.Literal("__premethods"), tsuperclass)
-  local tcalled_premethod = tlsubtype.getField(env, tltype.Literal(name_exp[1]), tpremethods)
-  if not tcalled_premethod then
-    local msg = "superclass %s does not have a premethod called %s"
+  local tcalled_method = tlsubtype.getField(env, tltype.Literal(name_exp[1]), tsuperclass_symbol)
+  local param_names = tlast.paramNames(ti_superclass[2])
+  if not tcalled_method then
+    local msg = "superclass %s does not define a method called %s"
     msg = string.format(msg, tltype.tostring(tsuperclass), name_exp[1])
     typeerror(env, "superinvoke", msg, name_exp.pos)
     return false
   end
-  assert(tltype.isFunction(tcalled_premethod))
-  local tinput,toutput = tcalled_premethod[1], tcalled_premethod[2] 
+  tcalled_method = tltype.clone(tcalled_method)
+  tcalled_method[1][1] = tsuperclass_symbol
+  assert(tltype.isFunction(tcalled_method))
+  local tinput,toutput = tcalled_method[1], tcalled_method[2] 
   local inferred_input = arglist2type(explist, env.strict)
   check_arguments(env, name_exp[1], tinput, inferred_input, exp.pos)
   set_type(env, exp, toutput)
