@@ -479,22 +479,22 @@ function tlast.call (pos, e1, targs, ...)
   return a
 end
 
--- invoke : (number, expr, expr, expr*) -> (apply)
-function tlast.invoke (pos, e1, e2, ...)
-  local a = { tag = "Invoke", pos = pos, [1] = e1, [2] = e2 }
+-- invoke : (number, expr, expr, {type}, expr*) -> (apply)
+function tlast.invoke (pos, e1, e2, targs, ...)
+  local a = { tag = "Invoke", pos = pos, [1] = e1, [2] = e2, [3] = targs }
   local list = { ... }
   for i = 1, #list do
-    a[i + 2] = list[i]
+    a[i + 3] = list[i]
   end
   return a
 end
 
--- superinvoke : (number, ename, ...) -> (apply)
-function tlast.superinvoke(pos, e, ...)
-  local a = { tag = "SuperInvoke", pos = pos, [1] = e }
+-- superinvoke : (number, e, {type}, exp*) -> (apply)
+function tlast.superinvoke(pos, e, targs, ...)
+  local a = { tag = "SuperInvoke", pos = pos, [1] = e, [2] = targs }
   local list = { ... }
   for i = 1, #list do
-    a[i + 1] = list[i]
+    a[i + 2] = list[i]
   end
   return a  
 end

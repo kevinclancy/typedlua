@@ -291,7 +291,7 @@ local G = lpeg.P { "TypedLua";
                 tlast.exprIndex +
                 (lpeg.Cp() * lpeg.Cg(tllexer.symb(":") *
                    (lpeg.Cp() * tllexer.token(tllexer.Name, "Name") / tlast.exprString) *
-                   lpeg.V("FuncArgs"))) / tlast.invoke +
+                   (lpeg.V("TypeArgs") + lpeg.Cc({})) * lpeg.V("FuncArgs"))) / tlast.invoke +
                 (lpeg.Cp() * (lpeg.V("TypeArgs") + lpeg.Cc({})) * 
                               lpeg.V("FuncArgs")) / tlast.call)^0, tlast.exprSuffixed);
   PrimaryExp = lpeg.V("Var") +
@@ -299,7 +299,7 @@ local G = lpeg.P { "TypedLua";
                lpeg.Cp() * tllexer.symb("(") * lpeg.V("Expr") * tllexer.symb(")") / tlast.exprParen;
   SuperInvoke = lpeg.Cp() * tllexer.kw("super") * tllexer.symb(":") * 
                 (lpeg.Cp() * tllexer.token(tllexer.Name, "Name") / tlast.exprString) * 
-                lpeg.V("FuncArgs") / tlast.superinvoke;
+                (lpeg.V("TypeArgs") + lpeg.Cc({})) * lpeg.V("FuncArgs") / tlast.superinvoke;
   Block = lpeg.Cp() * lpeg.V("StatList") * lpeg.V("RetStat")^-1 / tlast.block;
   IfStat = lpeg.Cp() * tllexer.kw("if") * lpeg.V("Expr") * tllexer.kw("then") * lpeg.V("Block") *
            (tllexer.kw("elseif") * lpeg.V("Expr") * tllexer.kw("then") * lpeg.V("Block"))^0 *
@@ -442,7 +442,7 @@ end
 local function traverse_invoke (env, invoke)
   local status, msg = traverse_exp(env, invoke[1])
   if not status then return status, msg end
-  for i=3, #invoke do
+  for i=4, #invoke do
     status, msg = traverse_exp(env, invoke[i])
     if not status then return status, msg end
   end
@@ -452,7 +452,7 @@ end
 local function traverse_superinvoke(env, superinvoke)
   local status, msg = traverse_exp(env, superinvoke[1])
   if not status then return status, msg end
-  for i=2, #superinvoke do
+  for i=3, #superinvoke do
     status, msg = traverse_exp(env, superinvoke[i])
     if not status then return status, msg end
   end

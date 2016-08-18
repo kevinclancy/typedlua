@@ -1213,13 +1213,62 @@ local function check_arguments (env, func_name, dec_type, infer_type, pos)
   end
 end
 
+-- shared call checking for function calls, method invocations, and super invocations
+-- t - the function type to call
+-- targs - the supplied type arguments
+-- args - the argument expressions
+-- call - the call expression
+-- call_target - the expression denoting the function being called
+-- (env, function_type, {type}, {exp}, exp, exp) -> (boolean)
+local function check_call_general (env, t, targs, args, call, call_target)
+  local inferred_type = arglist2type(args, env.strict)
+  local tinput = t[1]
+  local tret = t[2]
+  local tparams = t[3]
+  if #tparams ~= #targs then
+    local msg = "expected %d type arguments but got %d"
+    msg = string.format(msg, #tparams, #targs)
+    typeerror(env, "call", msg, call_target.pos)
+    set_type(env, call, Any)
+    return false
+  else
+    local substituted_bounds = {}
+    local param_names = tlast.paramNames(tparams)
+    -- substitute type args into bounds
+    for i, tparam in ipairs(tparams) do
+      local tbound = tparam[3]
+      tbound = tltype.substitutes(tbound, param_names, targs)
+      table.insert(substituted_bounds, tbound)
+    end
+    -- check that bounds are satisfied
+    for i,tparam in ipairs(tparams) do
+      local name, variance = tparam[1], tparam[2]
+      assert(variance == "Invariant")
+      local succ, explanation = tlsubtype.consistent_subtype(env, targs[i], substituted_bounds[i])
+      if not succ then
+        local msg = "type argument %s is not a subtype of bound %s"
+        msg = string.format(msg, tltype.tostring(targs[i]), tltype.tostring(substituted_bounds[i]))
+        typeerror(env, "call", msg .. "\n" .. explanation, targs[i].pos)
+        tinput = tltype.substitute(tinput, name, Any)
+        tret = tltype.substitute(tret, name, Any)
+      end
+    end
+    tinput = tltype.substitutes(tinput, param_names, targs)
+    tret = tltype.substitutes(tret, param_names, targs)
+  end
+  check_arguments(env, var2name(call_target), tinput, inferred_type, call.pos)
+  set_type(env, call, tret)   
+  return true
+end
 
 local function check_call (env, exp)
   local exp1 = exp[1]
   local targs = exp[2]
   local explist = {}
-  for _,targ in ipairs(targs) do
-    kindcheck(env, targ, false)
+  for i=1,#targs do
+    if not kindcheck(env, targs[i], false) then
+      targs[i] = Any
+    end
   end
   for i = 3, #exp do
     explist[i - 2] = exp[i]
@@ -1269,48 +1318,7 @@ local function check_call (env, exp)
     local inferred_type = arglist2type(explist, env.strict)
     local msg = "attempt to call %s of type '%s'"
     if tltype.isFunction(t) then
-      --todo substitute targs for t
-      local tinput = t[1]
-      local tret = t[2]
-      local tparams = t[3]
-      if #tparams ~= #targs then
-        local msg = "expected %d type arguments but got %d"
-        msg = string.format(msg, #tparams, #targs)
-        typeerror(env, "call", msg, exp1.pos)
-        set_type(env, exp, Any)
-      else
-        local substituted_bounds = {}
-        
-        local param_names = {}
-        for i,par in ipairs(tparams) do param_names[i] = par[1] end
-        
-        -- substitute type args into bounds
-        for i, tparam in ipairs(tparams) do
-          local tbound = (tparam[3] == "NoBound") and Value or tparam[3]
-          tbound = tltype.substitutes(tbound, param_names, targs)
-          table.insert(substituted_bounds, tbound)
-        end
-           
-        -- check that bounds are satisfied
-        for i,tparam in ipairs(tparams) do
-          local name, variance = tparam[1], tparam[2]
-          assert(variance == "Invariant")
-          local succ, explanation = tlsubtype.consistent_subtype(env, targs[i], substituted_bounds[i])
-          if not succ then
-            local msg = "type argument %s is not a subtype of bound %s"
-            msg = string.format(msg, tltype.tostring(targs[i]), tltype.tostring(substituted_bounds[i]))
-            typeerror(env, "call", msg .. "\n" .. explanation, targs[i].pos)
-            tinput = tltype.substitute(tinput, name, Any)
-            tret = tltype.substitute(tret, name, Any)
-          end
-        end
-        
-        --substitute type arguments
-        tinput = tltype.substitutes(tinput, param_names, targs)
-        tret = tltype.substitutes(tret, param_names, targs)
-      end
-      check_arguments(env, var2name(exp1), tinput, inferred_type, exp.pos)
-      set_type(env, exp, tret)      
+      check_call_general (env, t, targs, explist, exp, exp1)      
     elseif tltype.isAny(t) then
       set_type(env, exp, Any)
       msg = string.format(msg, var2name(exp1), tltype.tostring(t))
@@ -1325,62 +1333,65 @@ local function check_call (env, exp)
 end
 
 local function check_invoke (env, exp)
-  local exp1, exp2 = exp[1], exp[2]
+  local exp_object, exp_method_name, targs = exp[1], exp[2], exp[3]
   local explist = {}
-  for i = 3, #exp do
-    explist[i - 2] = exp[i]
+  for i = 4, #exp do
+    explist[i - 3] = exp[i]
   end
-  check_exp(env, exp1)
-  check_exp(env, exp2)
+  for i=1,#targs do
+    if not kindcheck(env, targs[i], false) then
+      targs[i] = Any
+    end
+  end
+  check_exp(env, exp_object)
+  check_exp(env, exp_method_name)
   check_explist(env, explist)
-  local t1, t2 = tlsubtype.unfold(env, get_type(exp1)), get_type(exp2)
-  --TODO: maybe we need to unfold exp1.type for pseudo-method invocations
-  if tltype.isTable(t1) then
-    assert(tltype.isLiteral(t2) and type(t2[1]) == "string")
-    local tfield = tlsubtype.getField(env, t2, t1)
+  local t_object, t_method_name = tlsubtype.unfold(env, get_type(exp_object)), get_type(exp_method_name)
+  if tltype.isTable(t_object) then
+    assert(tltype.isLiteral(t_method_name) and type(t_method_name[1]) == "string")
+    local tfield = tlsubtype.getField(env, t_method_name, t_object)
     if tfield and tltype.isFunction(tfield) and tltype.isSelf(tfield[1][1]) then
       table.insert(explist, 1, { type = Self })
     else
-      table.insert(explist, 1, { type = exp1.type})
+      table.insert(explist, 1, { type = exp_object.type})
     end
   else
-    table.insert(explist, 1, { type = exp1.type})
+    table.insert(explist, 1, { type = exp_object.type})
   end
-  if tltype.isTable(t1) or
-     tltype.isString(t1) or
-     tltype.isStr(t1) then
+  if tltype.isTable(t_object) or
+     tltype.isString(t_object) or
+     tltype.isStr(t_object) then
        
-    local inferred_type =  arglist2type(explist, env.strict)
-    local t3
-    if tltype.isTable(t1) then
-      t3 = tlsubtype.getField(env, t2, t1)
+    local t_method
+    if tltype.isTable(t_object) then
+      t_method = tlsubtype.getField(env, t_method_name, t_object)
     else
-      local string_userdata = env["loaded"]["string"] or tltype.Table()
-      t3 = tlsubtype.getField(env, t2, string_userdata)
-      inferred_type[1] = String
+      local string_userdata = env.genv["loaded"]["string"] or tltype.Table()
+      t_method = tlsubtype.getField(env, t_method_name, string_userdata)
     end
-    local msg = "attempt to call method '%s' of type '%s'"
-    if tltype.isFunction(t3) then
-      check_arguments(env, "field", t3[1], inferred_type, exp.pos)
-      set_type(env, exp, t3[2])
-    elseif tltype.isAny(t3) then
+    
+    if tltype.isFunction(t_method) then
+      check_call_general(env, t_method, targs, explist, exp, exp_object)
+    elseif tltype.isAny(t_method) then
       set_type(env, exp, Any)
-      msg = string.format(msg, exp2[1], tltype.tostring(t3))
+      local msg = "attempt to call method '%s' of type '%s'"
+      msg = string.format(msg, exp_method_name[1], tltype.tostring(t_method))
       typeerror(env, "any", msg, exp.pos)
     else
       set_type(env, exp, Nil)
-      msg = string.format(msg, exp2[1], tltype.tostring(t3))
+      local msg = "attempt to call method '%s' of type '%s'"
+      msg = string.format(msg, exp_method_name[1], tltype.tostring(t_method))
       typeerror(env, "invoke", msg, exp.pos)
     end
-  elseif tltype.isAny(t1) then
+  elseif tltype.isAny(t_object) then
     set_type(env, exp, Any)
     local msg = "attempt to index '%s' with '%s'"
-    msg = string.format(msg, tltype.tostring(t1), tltype.tostring(t2))
+    msg = string.format(msg, tltype.tostring(t_object), tltype.tostring(t_method_name))
     typeerror(env, "any", msg, exp.pos)
   else
     set_type(env, exp, Nil)
     local msg = "attempt to index '%s' with '%s'"
-    msg = string.format(msg, tltype.tostring(t1), tltype.tostring(t2))
+    msg = string.format(msg, tltype.tostring(t_object), tltype.tostring(t_method_name))
     typeerror(env, "index", msg, exp.pos)
   end
   return false
@@ -1406,13 +1417,15 @@ local function check_superinvoke (env, exp)
   local name_exp = exp[1]
   local explist = {}
   explist[1] = tlast.ident(0, "self")
-  for i = 2, #exp do
-    explist[i] = exp[i]
+  for i = 3, #exp do
+    explist[i-1] = exp[i]
   end
-  check_exp(env, name_exp)
+  check_exp(env, name_exp) --TODO: how does this not generate errors?
   assert(tltype.isStr(get_type(name_exp)))
   check_explist(env, explist)
   local tcalled_method = tlsubtype.getField(env, tltype.Literal(name_exp[1]), tsuperclass_symbol)
+  local tpars = tcalled_method[3]
+  local targs = exp[2]
   local param_names = tlast.paramNames(ti_superclass[2])
   if not tcalled_method then
     local msg = "superclass %s does not define a method called %s"
@@ -1422,12 +1435,11 @@ local function check_superinvoke (env, exp)
   end
   tcalled_method = tltype.clone(tcalled_method)
   tcalled_method[1][1] = tsuperclass_symbol
-  assert(tltype.isFunction(tcalled_method))
-  local tinput,toutput = tcalled_method[1], tcalled_method[2] 
-  local inferred_input = arglist2type(explist, env.strict)
-  check_arguments(env, name_exp[1], tinput, inferred_input, exp.pos)
-  set_type(env, exp, toutput)
-  return true
+  if check_call_general(env, tcalled_method, targs, explist, exp, name_exp) then
+    return true
+  else
+    return false
+  end
 end
 
 local function check_class_lookup(env, exp)

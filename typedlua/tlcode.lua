@@ -80,8 +80,8 @@ end
 
 local function code_invoke (invoke, fmt)
   local l = {}
-  for k = 3, #invoke do
-    l[k - 2] = code_exp(invoke[k], fmt)
+  for k = 4, #invoke do
+    l[k - 3] = code_exp(invoke[k], fmt)
   end
   local str = code_exp(invoke[1], fmt)
   str = str .. ":" .. invoke[2][1]
@@ -91,8 +91,8 @@ end
 
 local function code_superinvoke (superinvoke, fmt)
   local l = {}
-  for k = 2, #superinvoke do
-    l[k - 1] = code_exp(superinvoke[k], fmt)
+  for k = 3, #superinvoke do
+    l[k - 2] = code_exp(superinvoke[k], fmt)
   end
   local str = "super" .. ".__premethods." .. superinvoke[1][1]
   str = str .. "(" .. "self," .. table.concat(l, ",") .. ")"
