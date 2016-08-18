@@ -282,6 +282,7 @@ local G = lpeg.P { "TypedLua";
               lpeg.V("Constructor") +
               lpeg.V("SuffixedExp") +
               lpeg.V("SuperInvoke");
+              
   SuffixedExp = lpeg.Cf(lpeg.V("PrimaryExp") * (
                 (lpeg.Cp() * tllexer.symb(".") *
                   (lpeg.Cp() * tllexer.token(tllexer.Name, "Name") / tlast.exprString)) /
@@ -357,7 +358,7 @@ local G = lpeg.P { "TypedLua";
   Stat = lpeg.V("IfStat") + lpeg.V("WhileStat") + lpeg.V("DoStat") + lpeg.V("ForStat") +
          lpeg.V("RepeatStat") + lpeg.V("FuncStat") + lpeg.V("LocalStat") +
          lpeg.V("LabelStat") + lpeg.V("BreakStat") + lpeg.V("GoToStat") +
-         lpeg.V("TypeBundle") + lpeg.V("ImplementsStat") + lpeg.V("ExprStat");
+         lpeg.V("TypeBundle") + lpeg.V("ImplementsStat") + lpeg.V("ExprStat") + lpeg.V("SuperInvoke");
 }
 
 local traverse_stm, traverse_exp, traverse_var
@@ -791,6 +792,8 @@ function traverse_stm (env, stm)
     return traverse_typedefs(env, stm)
   elseif tag == "Implements" then
     return traverse_implements(env, stm)
+  elseif tag == "SuperInvoke" then
+    return traverse_superinvoke(env, stm)
   else
     error("trying to traverse a statement, but got a " .. tag)
   end

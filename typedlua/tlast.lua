@@ -82,6 +82,8 @@ field: `TField{ <string> type }
 
 local tlast = {}
 
+local tltype = require "typedlua.tltype"
+
 -- namelist : (number, ident, ident*) -> (namelist)
 function tlast.namelist (pos, id, ...)
   local t = { tag = "NameList", pos = pos, ... }
@@ -308,6 +310,15 @@ function tlast.paramNames (tpars)
     ret[#ret + 1] = tpar[1]
   end
   return ret
+end
+
+-- tpar : ({tpar}) -> ({type})
+function tlast.paramSymbols (tpars)
+  local ret = {}
+  for _,tpar in ipairs(tpars) do
+    ret[#ret + 1] = tltype.Symbol(tpar[1],{})
+  end
+  return ret  
 end
 
 -- fieldlist

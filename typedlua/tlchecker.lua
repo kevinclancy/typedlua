@@ -1041,11 +1041,11 @@ end
 
 local function check_function (env, exp)
   local idlist, ret_type, block, tpars = exp[1], exp[2], exp[3], exp[4]
-  if not kindcheck(env, ret_type, false) then
+  if ret_type and not kindcheck(env, ret_type, false) then
     ret_type = Any
     exp[2] = Any
   end
-  local infer_return = (ret_type ~= false)
+  local infer_return = (ret_type == false)
   tlst.begin_function(env)
   tlst.begin_scope(env)
   -- add type params to environment
@@ -1394,14 +1394,14 @@ local function check_superinvoke(env, exp)
     set_type(env, exp, Any)
     return
   end
-  local tsuperclass = tlsubtype.unfold(env, tsuperclass_symbol)
+  local tsuperclass = tlst.get_classtype(env, tsuperclass_symbol[1])
   local name_exp = exp[1]
   local explist = {}
   explist[1] = tlast.ident(0, "self")
   for i = 2, #exp do
     explist[i] = exp[i]
   end
-  check_exp(env,name_exp)
+  check_exp(env, name_exp)
   assert(tltype.isStr(get_type(name_exp)))
   check_explist(env, explist)
   if not tsuperclass then
@@ -1409,7 +1409,7 @@ local function check_superinvoke(env, exp)
     typeerror(env, "superinvoke", msg, exp.pos)
     return false
   end
-  
+  --TODO: substitute type args
   local tpremethods = tlsubtype.getField(env, tltype.Literal("__premethods"), tsuperclass)
   local tcalled_premethod = tlsubtype.getField(env, tltype.Literal(name_exp[1]), tpremethods)
   if not tcalled_premethod then
@@ -2372,6 +2372,8 @@ end
 local function get_class_types (env, def, is_local)
   local name, isAbstract, elems, superclass = def[1], def[2], def[3], def[4]
   local t_params, superargs = def[5], def[6]
+  local typename = tlst.get_typealias(env, name[1])
+  
   local constructors, methods, members = get_elem_types(env, elems)
   local superclass_members, superclass_methods, superclass_fields
   if superclass == "NoParent" then
@@ -2417,7 +2419,7 @@ local function get_class_types (env, def, is_local)
   
   local t_instance = tltype.Table(table.unpack(instance_fields))
   t_instance.fixed = true
-  t_instance.name = name[1]
+  t_instance.name = typename
   
   --construct a symbol to recursively refer to an applied type operator
   local param_symbols = {}
@@ -2447,7 +2449,7 @@ local function get_class_types (env, def, is_local)
   for _,field in pairs(instance_methods) do
     local t_param_symbols = {}
     for i,param in ipairs(t_params) do t_param_symbols[i] = tltype.Symbol(t_params[i][1]) end
-    t_premethods[#t_premethods + 1] = premethod_from_method(field,tltype.Symbol(name[1],t_param_symbols)) 
+    t_premethods[#t_premethods + 1] = premethod_from_method(field,tltype.Symbol(typename,t_param_symbols)) 
   end
   
   local t_class = tltype.Table(table.unpack(class_constructors))
@@ -2482,7 +2484,10 @@ local function check_class_code(env, elems, t_instance, instance_members, superc
   for _,elem in ipairs(elems) do
     if elem.tag == "ConcreteClassMethod" then
       local name,parlist,tret,body,tpars = elem[1], elem[2], elem[3], elem[4], elem[5]
+      tlst.begin_scope(env)
+      tlst.set_tsuper(env, tsuper_inst)
       check_method(env,tpars,parlist,tret,body,t_instance,elem.pos)
+      tlst.end_scope(env)
     elseif elem.tag == "ClassConstructor" then
       check_constructor(env, elem, instance_members, superclass_members, tsuper_inst)
     else
@@ -2781,7 +2786,7 @@ local function check_typebundle (env, stm)
       if tsuper ~= "NoParent" then
         local class_name_id, class_tpars = def[1], def[5]
         local class_name = tlst.get_typealias(env, class_name_id[1])
-        local tinstance = tltype.Symbol(class_name, class_tpars)
+        local tinstance = tltype.Symbol(class_name, tlast.paramSymbols(class_tpars))
         tlst.begin_scope(env) --check class methods covariant
         --insert type parameters
         tlst.set_tpars(env, class_tpars)
@@ -2846,17 +2851,18 @@ local function check_typebundle (env, stm)
   -- typecheck all class code
   for _, def in ipairs(defs) do
     if def.tag == "Class" then
-      local elems, tsuper, tpars = def[3], def[4], def[5]
+      local name, elems, tsuper, tpars = def[1], def[3], def[4], def[5]
+      local typename = tlst.get_typealias(env, name[1])
       tlst.begin_scope(env) --class type parameters
       tlst.set_tpars(env, tpars)
       for _,tpar in ipairs(tpars) do
         local name, variance, tbound = tpar[1], tpar[2], tpar[3]
-        tbound = (tbound == "NoBound") and Value or tbound
         local ti = tlst.typeinfo_Variable(tbound, variance, name)
         tlst.set_typeinfo(env, name, ti, true)
       end
       local t_instance, t_class, instance_members, superclass_members = get_class_types(env, def, is_local)
-      check_class_code(env, elems, t_instance, instance_members, superclass_members, tsuper)
+      local t_instance_symbol = tltype.Symbol(typename, tlast.paramSymbols(tpars))
+      check_class_code(env, elems, t_instance_symbol, instance_members, superclass_members, tsuper)
       tlst.end_scope(env) -- class type parameters
     end
   end
@@ -3121,6 +3127,8 @@ function check_stm (env, stm)
     return check_call(env, stm)
   elseif tag == "Invoke" then
     return check_invoke(env, stm)
+  elseif tag == "SuperInvoke" then
+    return check_superinvoke(env, stm)
   elseif tag == "TypeBundle" then
     return check_typebundle(env, stm)
   elseif tag == "Implements" then
