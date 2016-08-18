@@ -192,7 +192,7 @@ local function nominal_edge_string (env, source, dest, instantiation)
   assert(ti_dest ~= nil and ti_dest.tag == "TINominal")
   
   local ret = tlutils.abbreviate(source)
-  local source_par_names = tlast.param_names(ti_source[2])
+  local source_par_names = tlast.paramNames(ti_source[2])
   if #source_par_names > 0 then
     ret = ret .. '<' .. table.concat(source_par_names, ',') .. '>'
   end
@@ -226,8 +226,8 @@ local function add_material_edges (env, source, dest, instantiation, is_local)
   assert(not ti_source.is_shape)
   assert(not ti_dest.is_shape)
   local edges_added = {}
-  local src_par_names = tlast.param_names(ti_source[2])
-  local dest_par_names = tlast.param_names(ti_dest[2])
+  local src_par_names = tlast.paramNames(ti_source[2])
+  local dest_par_names = tlast.paramNames(ti_dest[2])
   local edge_str = nominal_edge_string(env, source, dest, instantiation)
   tlst.begin_scope(env) --tpars
   tlst.set_tpars(env, ti_source[2])
@@ -316,7 +316,10 @@ end
 function tlst.add_nominal_edge (env, source, dest, instantiation, subst, is_local)  
   local ti_source = tlst.get_typeinfo(env,source)
   local ti_dest = tlst.get_typeinfo(env,dest)
-  assert(ti_source ~= nil and ti_source.tag == "TINominal")
+  if (ti_source == nil or ti_source.tag ~= "TINominal") then
+    assert(false)
+  end
+  assert(ti_source ~= nil and ti_source.tag == "TINominal") 
   assert(ti_dest ~= nil and ti_dest.tag == "TINominal")
   local source_params = ti_source[2]
   local dest_params = ti_dest[2]
@@ -380,8 +383,8 @@ function tlst.add_nominal_edge (env, source, dest, instantiation, subst, is_loca
     add_material_edges(env, source, dest, instantiation)
   end
   
-  local source_param_names = tlast.param_names(source_params)
-  local dest_param_names = tlast.param_names(dest_params)
+  local source_param_names = tlast.paramNames(source_params)
+  local dest_param_names = tlast.paramNames(dest_params)
   
   for descendant,_ in pairs(source_descendants) do
     local desc_src_edges = {}

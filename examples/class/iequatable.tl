@@ -3,7 +3,7 @@ interface IEq<-T>
   method eq : (T) => (boolean)
 end
 
-class Number implements IEq<Number> --creates a material cycle, since IEq is not a shape
+class Number implements IEq<Number> --creates a type cycle, since IEq is not a shape
   const val : number
   
   constructor new(val : number)
@@ -15,7 +15,7 @@ class Number implements IEq<Number> --creates a material cycle, since IEq is not
   end
 end
 
---the following implements clause creates an expansive param cycle and therefore generates
+--the following implements clause creates a type cycle and therefore generates
 --an error
 class Pair<+A, +B> implements IEq< Pair< IEq<A>, IEq<B> > >
   const a : A
@@ -30,3 +30,9 @@ class Pair<+A, +B> implements IEq< Pair< IEq<A>, IEq<B> > >
     self.b = b
   end
 end
+
+class Pale<A,B> 
+  constructor new() end
+end
+
+Pale<A,B> implements IEq<A>

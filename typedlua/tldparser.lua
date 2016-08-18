@@ -128,8 +128,8 @@ local G = lpeg.P { "TypedLuaDescription";
                  tllexer.kw("end") / tlast.statShape;
                  
   InterfaceElement = lpeg.Cp() * tllexer.kw("method") * lpeg.V("Id") * 
-                     tllexer.symb(":") * lpeg.V("MethodType") /
-                     tlast.classElementAbstractMethod;      
+                     tllexer.symb(":") * (lpeg.V("InvTypeParams") + lpeg.Cc({})) * 
+                     lpeg.V("MethodType") / tlast.classElementAbstractMethod;      
                      
   TypeBundle = lpeg.Ct(lpeg.V("TypeDefinition") * 
                (tllexer.kw("and") * lpeg.V("TypeDefinition"))^0) / tlast.statTypeBundle;

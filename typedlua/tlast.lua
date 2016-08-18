@@ -256,13 +256,13 @@ function tlast.classElementAbstractField(pos,name,ty)
 end
 
 --classElementConcreteMethod : (pos,name,parlist,type,block) -> (classElement)
-function tlast.classElementConcreteMethod(pos,name,parlist,rettype,body)
-  return { tag = "ConcreteClassMethod", pos = pos, [1] = name, [2] = parlist, [3] = rettype, [4] = body }
+function tlast.classElementConcreteMethod(pos,name,tpars,parlist,rettype,body)
+  return { tag = "ConcreteClassMethod", pos = pos, [1] = name, [2] = parlist, [3] = rettype, [4] = body, [5] = tpars }
 end
 
 --classElementAbstractMethod : (pos,name,ty) -> (classElement)
-function tlast.classElementAbstractMethod(pos,name,ty)
-  return { tag = "AbstractClassMethod", pos = pos, [1] = name, [2] = ty }
+function tlast.classElementAbstractMethod(pos,name,tpars,ty)
+  return { tag = "AbstractClassMethod", pos = pos, [1] = name, [2] = ty, [3] = tpars }
 end
 
 --classElementConstructor : (pos,parlist,string|"NoSuperCall",explist|"NoSuperCall",block) -> (classElement)
@@ -302,7 +302,7 @@ function tlast.tpar (pos, variance, str, tbound)
 end
 
 -- tpar : ({tpar}) -> ({string})
-function tlast.param_names (tpars)
+function tlast.paramNames (tpars)
   local ret = {}
   for _,tpar in ipairs(tpars) do
     ret[#ret + 1] = tpar[1]

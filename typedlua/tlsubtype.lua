@@ -16,6 +16,9 @@ local function unfold_aux (memo, env, t)
   memo[s] = true
   if t.tag == "TSymbol" then
     local ti = tlst.get_typeinfo(env,t[1])
+    if not ti then
+      assert(false)
+    end
     if ti.tag == "TIUserdata" then
       return unfold_aux(memo, env, ti[1])
     elseif ti.tag == "TIStructural" then
@@ -520,7 +523,7 @@ local function subtype_tuple (assume, env, t1, t1_str, t2, t2_str, relation)
         local s1,s2 = tltype.tostring(t1[i]), tltype.tostring(t2[i])
         local ord = tlutils.order_description(i)
         local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
-        local component = string.format("\n%dth component %s is not a subtype of %s", ord, s1, s2)
+        local component = string.format("\n%sth component %s is not a subtype of %s", ord, s1, s2)
         local msg = problem .. component .. "\n" .. explanation        
         return false, msg
       end
@@ -634,7 +637,7 @@ function subtype (assume, env, t1, t2, relation, verbose)
     local ret,msg = subtype(assume,env, t1, t2_nil, relation)
     assume[key] = nil
     return ret, msg
-  elseif tltype.isFunction(t1) or tltype.isFunction(t2) then
+  elseif tltype.isFunction(t1) and tltype.isFunction(t2) then
     local ret,msg = subtype_function(assume, env, t1, t1_str, t2, t2_str, relation)
       assume[key] = nil
       return ret, msg
@@ -642,11 +645,11 @@ function subtype (assume, env, t1, t2, relation, verbose)
     local ret,msg = subtype_symbol(assume, env, t1, t1_str, t2, t2_str, relation, verbose)      
     assume[key] = nil
     return ret, msg
-  elseif tltype.isTable(t1) or tltype.isTable(t2) then
+  elseif tltype.isTable(t1) and tltype.isTable(t2) then
     local ret,msg = subtype_table(assume, env, t1, t1_str, t2, t2_str, relation)
     assume[key] = nil
     return ret,msg
-  elseif tltype.isSelf(t1) or tltype.isSelf(t2) then
+  elseif tltype.isSelf(t1) and tltype.isSelf(t2) then
     assume[key] = nil
     return false, string.format("%s is not a subtype of %s", t1_str, t2_str)
   elseif tltype.isTuple(t1) and not tltype.isTuple(t2) then
@@ -688,10 +691,13 @@ function tlsubtype.getField (env, f, t)
   end
 end
 
---rather than getting the value that corresponds to a field,
+--rather than getting the value that a field contains,
 --get the table that represents the field
 function tlsubtype.getFieldTable(env, k, t)
-  assert(tltype.isTable(t))
+  if not tltype.isTable(t) then
+      assert(false)
+  end
+  
   for _, v in ipairs(t) do
     if tlsubtype.consistent_subtype(env, k, v[1]) then
       return v

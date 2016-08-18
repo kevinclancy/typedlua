@@ -130,13 +130,15 @@ local G = lpeg.P { "TypedLua";
   
   ClassAbstractMethodDef = lpeg.Cp() * tllexer.kw("abstract") * tllexer.kw("method") *
                         lpeg.V("Id") * tllexer.symb(":") *
+                        (lpeg.V("InvTypeParams") + lpeg.Cc({})) * 
                         lpeg.V("MethodType") / tlast.classElementAbstractMethod;
   
-  InterfaceElement = lpeg.Cp() * tllexer.kw("method") * lpeg.V("Id") * tllexer.symb(":") * lpeg.V("MethodType") 
+  InterfaceElement = lpeg.Cp() * tllexer.kw("method") * lpeg.V("Id") * tllexer.symb(":") * 
+                     (lpeg.V("InvTypeParams") + lpeg.Cc({})) * lpeg.V("MethodType") 
                      / tlast.classElementAbstractMethod;
   
   ClassConcreteMethodDef =  lpeg.Cp() * tllexer.kw("method") *
-                         lpeg.V("Id") *
+                         lpeg.V("Id") * (lpeg.V("InvTypeParams") + lpeg.Cc({})) * 
                          tllexer.symb("(") * lpeg.V("ParList") * tllexer.symb(")") *
                          tllexer.symb(":") * lpeg.V("RetType") * 
                          lpeg.V("Block") * tllexer.kw("end") / 

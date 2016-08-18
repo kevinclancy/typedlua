@@ -61,6 +61,9 @@ end
 
 -- current_module : () -> (string)
 local function current_modname (env)
+  if (env.filename == nil) then
+    assert(false)
+  end
   return filename_to_modulename(env.filename)
 end
 
@@ -91,7 +94,7 @@ end
 --context_desc : string - a description of the type's context: 
 --  "inheritance clause", "type parameter bound", etc. 
 local function kindcheck_arity (env, t, allow_outer_shape, context)
-  if type(t) == "boolean" then
+  if type(t) ~= "table" then
     assert(false)
   end
   if t.tag == "TLiteral" then
@@ -142,7 +145,7 @@ local function kindcheck_arity (env, t, allow_outer_shape, context)
       local name, variance, tbound = tpar[1], tpar[2], tpar[3]
       assert(variance == "Invariant")
       local ti = tlst.typeinfo_Variable(tbound, variance, name)
-      env.set_typeinfo(env, name, ti, true)
+      tlst.set_typeinfo(env, name, ti, true)
     end
     for i,tpar in ipairs(t[3]) do
       local tbound = tpar[3]
@@ -189,7 +192,6 @@ local function kindcheck_arity (env, t, allow_outer_shape, context)
     expand_typealias(env, t)
     local name = t[1]
     local args = t[2]
-    
     if context and (context.tag == "Inheritance" or context.tag == "Bound") then
       if context.bundle_typenames[name] then
         local msg = "occurences of mutually recursive type %s not allowed in %s"
@@ -198,11 +200,7 @@ local function kindcheck_arity (env, t, allow_outer_shape, context)
         return false
       end
     end
-    
     local ti = tlst.get_typeinfo(env, name)
-    
-
-  
     if not ti then
       if context and context.tag == "InferredReturnType" then
         local msg = "locally-scoped type %s occurs in inferred return type %s"
@@ -210,7 +208,7 @@ local function kindcheck_arity (env, t, allow_outer_shape, context)
         typeerror(env, "kind", msg, context.pos)
         return false
       else
-        local msg = string.format("Undeclared type %s", name)
+        local msg = string.format("undeclared type %s", name)
         typeerror(env, "kind", msg, t.pos)
         return false
       end      
@@ -342,7 +340,7 @@ local function kindcheck_bounds (env, t, context)
       local name, variance, tbound = tpar[1], tpar[2], tpar[3]
       assert(variance == "Invariant")
       local ti = tlst.typeinfo_Variable(tbound, variance, name)
-      env.set_typeinfo(env, name, ti, true)
+      tlst.set_typeinfo(env, name, ti, true)
     end
     for i,tpar in ipairs(t[3]) do
       local tbound = tpar[3]
@@ -2039,12 +2037,13 @@ local function get_elem_types (env, elems)
         --TODO: handle abstract vs. concrete fields
         members[name] = { id = elem[1], ty = t, const = elem.const }
       elseif elem.tag == "ConcreteClassMethod" then
-        local name,parlist,tret = elem[1][1],elem[2],elem[3]
+        local name,parlist,tret,tpars = elem[1][1],elem[2],elem[3],elem[5]
         local t1 = check_parameters(env, parlist, false, elem.pos, false)
         local t2 = tret
-        methods[name] = { id = elem[1], ty = tltype.Function({}, t1, t2, true) }
+        methods[name] = { id = elem[1], ty = tltype.Function(tpars, t1, t2, true) }
       elseif elem.tag == "AbstractClassMethod" then
-        local name, t = elem[1][1], elem[2] 
+        local name, t, tpars = elem[1][1], elem[2]
+        t[3] = tpars
         methods[name] = { id = elem[1], ty = t }
       elseif elem.tag == "ClassConstructor" then
         local name,parlist = elem[1][1],elem[2]
@@ -2148,9 +2147,11 @@ local function check_constructor (env, elem, instance_members, parent_members, t
   tlst.end_function(env)
 end
 
-local function check_method (env, idlist, tret, body, tself, pos)
+local function check_method (env, tpars, idlist, tret, body, tself, pos)
+  tlst.begin_scope(env) --type params
+  tlst.set_tpars(env, tpars)
   tlst.begin_function(env)
-  tlst.begin_scope(env)  
+  tlst.begin_scope(env) --local vars
   local input_type = check_parameters(env, idlist, true, idlist.pos, true)
   local t = tltype.Function({}, input_type, tret)
   local len = #idlist
@@ -2166,10 +2167,11 @@ local function check_method (env, idlist, tret, body, tself, pos)
   local r = check_block(env,body)
   if not r then tlst.set_return_type(env, tltype.Tuple({ Nil }, true)) end
   check_unused_locals(env)
-  tlst.end_scope(env)
+  tlst.end_scope(env) --local vars
   local inferred_type = infer_return_type(env)
   check_return_type(env, inferred_type, tret, pos)
   tlst.end_function(env)
+  tlst.end_scope(env) --type params
 end
 
 local function premethod_from_method (method, tinstance)
@@ -2254,7 +2256,9 @@ end
 local function kindcheck_arity_class_elems(env, elems)
   for _,elem in ipairs(elems) do
     if elem.tag == "ConcreteClassMethod" then
-      local parlist,tret = elem[2], elem[3]
+      local parlist,tret,tpars = elem[2], elem[3], elem[5]
+      tlst.begin_scope(env) --tpars
+      tlst.set_tpars(env,tpars)
       tlst.set_variance(env, "Contravariant")
       for i,par in ipairs(parlist) do
         if not kindcheck_arity(env, par[2], false) then
@@ -2265,11 +2269,16 @@ local function kindcheck_arity_class_elems(env, elems)
       if not kindcheck_arity(env, tret, false) then
         elem[3] = Any
       end
+      tlst.end_scope(env) --tpars
     elseif elem.tag == "AbstractClassMethod" then
+      local ty,tpars = elem[2], elem[3]
+      tlst.begin_scope(env) --tpars
+      tlst.set_tpars(env, tpars)
       tlst.set_variance(env, "Covariant")
-      local success = kindcheck_arity(env, elem[2], false)
+      local success = kindcheck_arity(env, ty, false)
       --method types are not symbols, and therefore cannot fail arity checking
       assert(success)
+      tlst.end_scope(env) --tpars
     elseif elem.tag == "ClassConstructor" then
       local parlist = elem[2]
       tlst.set_variance(env, "Bivariant")
@@ -2298,7 +2307,9 @@ end
 local function kindcheck_class_elems(env, elems)
   for _,elem in ipairs(elems) do
     if elem.tag == "ConcreteClassMethod" then
-      local parlist,tret = elem[2], elem[3]
+      local parlist,tret,tpars = elem[2], elem[3], elem[4]
+      tlst.begin_scope(env) --tpars
+      tlst.set_tpars(env, tpars)
       tlst.set_variance(env, "Contravariant")      
       for i,par in ipairs(parlist) do
         if not kindcheck(env, par[2], false) then
@@ -2309,11 +2320,16 @@ local function kindcheck_class_elems(env, elems)
       if not kindcheck(env, tret) then
         elem[3] = Any
       end
+      tlst.end_scope(env) --tpars
     elseif elem.tag == "AbstractClassMethod" then
+      local t, tpars = elem[2], elem[3]
+      tlst.begin_scope(env)
+      tlst.set_tpars(env, tpars)
       tlst.set_variance(env, "Covariant")
-      local success = kindcheck(env, elem[2], false)
-      --method types are not symbols, and therefore cannot fail arity checking
-      assert(success)      
+      local success = kindcheck(env, t, false)
+      --method types are not symbols, and therefore cannot fail arity checking at the top level
+      assert(success)
+      tlst.end_scope(env) --tpars
     elseif elem.tag == "ClassConstructor" then
       local parlist = elem[2]
       tlst.set_variance(env, "Bivariant")
@@ -2465,8 +2481,8 @@ end
 local function check_class_code(env, elems, t_instance, instance_members, superclass_members, tsuper_inst)
   for _,elem in ipairs(elems) do
     if elem.tag == "ConcreteClassMethod" then
-      local name,parlist,tret,body = elem[1], elem[2], elem[3], elem[4]
-      check_method(env,parlist,tret,body,t_instance,elem.pos)
+      local name,parlist,tret,body,tpars = elem[1], elem[2], elem[3], elem[4], elem[5]
+      check_method(env,tpars,parlist,tret,body,t_instance,elem.pos)
     elseif elem.tag == "ClassConstructor" then
       check_constructor(env, elem, instance_members, superclass_members, tsuper_inst)
     else
@@ -2475,7 +2491,87 @@ local function check_class_code(env, elems, t_instance, instance_members, superc
   end  
 end
 
-local function make_tmethod (parlist, rettype)
+local function check_method_covariance (env, typename, methodname, tmethod, tsupermethod, tsuper)
+  local tmethod_unparameterized = tltype.Function({}, tmethod[1], tmethod[2])
+  local tsupermethod_unparameterized = tltype.Function({}, tsupermethod[1], tsupermethod[2])
+  local tpars = tmethod[3]
+  local tpars_super = tsupermethod[3]
+  if #tpars ~= #tpars_super then
+    local msg = "method %s has %d type parameters, whereas %s's method %s has %d type parameters"
+    return msg, false
+  end
+  tlst.begin_scope(env) --tpars
+  tlst.set_tpars(env, tpars_super)
+  for i=1,#tpars do
+    local succ, msg = tlsubtype.consistent_subtype(env, tpars_super[i][3], tpars[i][3])
+    if not succ then
+      local expl = "%s type parameter bound of method %s is not a supertype of %s type parameter bound of %s's method %s"      local ordi = tlutils.order_description(i)
+      expl = string.format(expl, ordi, methodname, ordi, tltype.tostring(tsuper), methodname)
+      msg = expl .. "\n" .. msg
+      tlst.end_scope(emv) -- tpars
+      return false, msg
+    end
+  end
+  local succ, msg = tlsubtype.consistent_subtype(env, tmethod_unparameterized, tsupermethod_unparameterized)
+  tlst.end_scope(env) --tpars
+  return succ, msg
+end
+
+local function check_nominal_edge (env, tsub, tsuper)
+  assert(tsub.tag == "TSymbol")
+  assert(tsuper.tag == "TSymbol")
+  local tsubtable = tlsubtype.unfold(env, tsub)
+  local tsupertable = tlsubtype.unfold(env, tsuper)
+  assert(tsupertable.tag == "TTable")
+  assert(tsubtable.tag == "TTable")
+  local subname = tltype.tostring(tsub)
+  local supername = tltype.tostring(tsuper)
+  for _,field in ipairs(tsupertable) do
+    local tfieldkey, tfieldval = field[1], field[2]
+    assert(tfieldkey.tag == "TLiteral" and type(tfieldkey[1]) == "string")
+    local keyname = tfieldkey[1]
+    if tfieldval.tag == "TFunction" and tltype.isSelf(tfieldval[1][1]) then
+      local tsub_method = tlsubtype.getField(env, tfieldkey, tsubtable)
+      if tsub_method.tag ~= "TFunction" or not tltype.isSelf(tsub_method[1][1]) then
+        local msg = "field %s of %s has non method type %s, while field %s of %s has method type %s"
+        msg = string.format(msg, keyname, subname, tltype.tostring(tsub_method),
+                keyname, tsuper, tltype.tostring(tfieldval))
+        return false, msg
+      end
+      local succ,msg = check_method_covariance(env, subname, keyname, tsub_method, tfieldval, tsuper)
+      if not succ then
+        local expl = "%s.%s has type %s, which is not a consistent subtype of %s, the type of %s.%s"
+        expl = string.format(expl, subname, keyname, tltype.tostring(tsub_method), tltype.tostring(tfieldval), supername, keyname)
+        return false, expl .. "\n" .. msg
+      end
+    else
+      local tsub_fieldpresent = tlsubtype.getFieldTable(env, tfieldkey, tsubtable)
+      if not tsub_fieldpresent then
+        local expl = "%s has a field named %s, but %s has no such field"
+        expl = string.format(expl, supername, keyname, subname)
+        return false, expl
+      end
+      local tsub_fieldval = tlsubtype.getField(env, tfieldkey, tsubtable)
+      local succ, msg = tlsubtype.consistent_subtype(env, tsub_fieldval, tfieldval)
+      if not succ then
+        local expl = "%s.%s has type %s, which is not a consistent supertype of the type %s of %s.%s"
+        expl = string.format(expl, supername, keyname, tltype.tostring(tfieldval), tltype.tostring(tsub_fieldval), subname, keyname)
+        expl = expl .. "\n" .. msg
+        return false, expl
+      end
+      succ, msg = tlsubtype.consistent_subtype(env, tfieldval, tsub_fieldval)
+      if not succ then
+        local expl = "%s.%s has type %s, which is not a consistent subtype of %s, the type of %s.%s"
+        expl = string.format(expl, supername, keyname, tltype.tostring(tfieldval), tltype.tostring(tsub_fieldval), subname, keyname)
+        expl = expl .. "\n" .. msg
+        return false, expl
+      end
+    end
+  end
+  return true
+end
+
+local function make_tmethod (tpars, parlist, rettype)
   local pars = {}
   for i,par in ipairs(parlist) do
     local t = par[2]
@@ -2483,7 +2579,59 @@ local function make_tmethod (parlist, rettype)
   end
   local t1 = tltype.Tuple(pars)
   local t2 = tltype.Tuple({rettype})
-  return tltype.Function({}, t1, t2, true)
+  return tltype.Function(tpars, t1, t2, true)
+end
+
+--1.) kindcheck all interface clauses
+--2.) add nominal subtyping edges for all implements clauses in bundle _defs_ 
+--3.) also, generate type errors if any of these edges are unsound
+--(whether they are sound or not, we leave the edges in the environment)
+local function check_bundle_implements(env, defs, is_local)
+  --insert all edges into nominal subtyping graph
+  for _,def in ipairs(defs) do
+    if def.tag == "Class" then
+      local name, tpars, interfaces = def[1], def[5], def[6]
+      local typename = tlst.get_typealias(env, name[1])
+      tlst.begin_scope(env) --class type parameters
+      tlst.set_tpars(env, tpars)
+      for i=1,#interfaces do
+        while not kindcheck(env, interfaces[i], true) do
+          table.remove(interfaces, i)
+        end
+      end
+      tlst.end_scope(env) --class type parameters
+      for _,t in ipairs(interfaces) do
+        local succ, msg =  tlst.add_nominal_edge(env, typename, t[1], t[2], tltype.substitutes, is_local)
+        if not succ then
+          typeerror(env, "implements", msg, t.pos)
+        end
+      end
+    end
+  end
+  
+  --check the adequacy of each implements edge
+  for _,def in ipairs(defs) do
+    if def.tag == "Class" then
+      local name, tpars, interfaces = def[1], def[5], def[6]
+      local typename = tlst.get_typealias(env, name[1])
+      local paramSymbols = {}
+      for i,name in ipairs(tlast.paramNames(tpars)) do
+        paramSymbols[i] = tltype.Symbol(name, {})
+      end
+      local t_instance_symbol = tltype.Symbol(typename, paramSymbols)
+      tlst.begin_scope(env) --class type parameters
+      tlst.set_tpars(env, tpars)
+      for i,t in ipairs(interfaces) do
+        assert(t.tag == "TSymbol")
+        local succ, msg = check_nominal_edge(env, t_instance_symbol, t)
+        if not succ then
+          typeerror(env, "implements", msg, t.pos)
+        end
+      end
+      tlst.end_scope(env) --class type parameters
+    end
+  end
+  return true
 end
 
 local function check_typebundle (env, stm)
@@ -2518,12 +2666,12 @@ local function check_typebundle (env, stm)
     end
   end
   
-  --check inheritance clauses
+  --kindcheck inheritance clauses
   for _,def in ipairs(defs) do
     if def.tag == "Class" then
       local tsuper = def[4]
       if tsuper ~= "NoParent" then
-        tlst.begin_scope(env) --check inheritance clause
+        tlst.begin_scope(env) --kindcheck inheritance clause
         tlst.set_tpars(env, def[5])
         local context = { 
           tag = "Inheritance", 
@@ -2626,40 +2774,18 @@ local function check_typebundle (env, stm)
     end
   end
     
-  --check method covariance: note that the types involved do NOT need to be well-bounded for this
-  --the parameter and return types of non-covariant methods are converted to Any
+  --check soundness of inheritance (i.e. 'extends') subtyping edges
   for _,def in ipairs(defs) do
     if def.tag == "Class" then
       local tsuper = def[4]
       if tsuper ~= "NoParent" then
+        local class_name_id, class_tpars = def[1], def[5]
+        local class_name = tlst.get_typealias(env, class_name_id[1])
+        local tinstance = tltype.Symbol(class_name, class_tpars)
         tlst.begin_scope(env) --check class methods covariant
         --insert type parameters
-        local elems, tpars = def[3], def[5]
-        tlst.set_tpars(env, tpars)
-        --we need super elems
-        local superclass_members, superclass_methods, superclass_fields = get_superclass_fields(env, tsuper)
-            
-        for _,elem in ipairs(elems) do
-          if elem.tag == "ConcreteClassMethod" then
-            local name, parlist, rettype = elem[1], elem[2], elem[3]
-            local super_method = superclass_methods[name]
-            if super_method then
-              local tmethod = make_tmethod(parlist,rettype)
-              local tsuper_method = super_method[2]
-              
-              if not tlsubtype.consistent_subtype(env, tmethod, tsuper_method) then
-                local msg = "method type %s of %s is not a subtype of super class method type %s"
-                msg = string.format(msg, tltype.tostring(tmethod), name, tltype.tostring(tsuper_method))
-                typeerror(env, "inheritance", msg, elem.pos)
-                for i,par in ipairs(parlist) do
-                  parlist[i][2] = Any 
-                end
-                parlist[#parlist][2] = tltype.Vararg(Any)
-                elem[3] = Any
-              end
-            end
-          end
-        end
+        tlst.set_tpars(env, class_tpars)
+        local succ,msg = check_nominal_edge(env, tinstance, tsuper)
         tlst.end_scope(env) --check class methods covariant
       end 
     end
@@ -2673,7 +2799,9 @@ local function check_typebundle (env, stm)
       tlst.set_tpars(env, tpars)
       for _,elem in ipairs(elems) do
         if elem.tag == "ConcreteClassMethod" then
-          local parlist, tret = elem[2], elem[3]
+          local parlist, tret, tpars = elem[2], elem[3], elem[5]
+          tlst.begin_scope(env) --tpars
+          tlst.set_tpars(env, tpars)
           for i,par in ipairs(parlist) do
             tlst.set_variance(env, "Contravariant")
             if not kindcheck(env, par[2], false) then
@@ -2684,6 +2812,7 @@ local function check_typebundle (env, stm)
           if not kindcheck(env, tret, false) then
             elem[3] = Any
           end
+          tlst.end_scope(env) --tpars
         end
       end
       tlst.end_scope(env) -- class type parameters
@@ -2693,7 +2822,8 @@ local function check_typebundle (env, stm)
       tlst.set_tpars(env, tpars)
       for _,elem in ipairs(elems) do
         if elem.tag == "AbstractClassMethod" then
-          local name, ty = elem[1], elem[2]
+          local name, ty, method_tpars = elem[1], elem[2], elem[3]
+          ty[3] = method_tpars
           tlst.set_variance(env, "Covariant")
           local success = kindcheck(env, ty, false)
           assert(success) --method types must be functions, so kindchecking will not fail at the top level
@@ -2709,65 +2839,9 @@ local function check_typebundle (env, stm)
     end
   end
 
-  --kindcheck the implements clauses of each class
-  for _,def in ipairs(defs) do
-    if def.tag == "Class" then
-      tlst.begin_scope(env)
-      local interfaces, tpars = def[6], def[5]
-      tlst.set_tpars(env, tpars)
-      local new_interfaces = {}
-      local msg = "classes can only implement class and interface types, but %s is not one"
-      for i,t in ipairs(interfaces) do
-        if kindcheck(env, t, true) then
-          if t.tag == "TSymbol" then
-            local ti = tlst.get_typeinfo(env, t[1])
-            if ti.tag == "TINominal" then
-              new_interfaces[#new_interfaces + 1] = t
-            else
-              msg = string.format(msg, tltype.tostring(t))
-              typeerror(env, "inheritance", msg, t.pos)              
-            end
-          else
-            msg = string.format(msg, tltype.tostring(t))
-            typeerror(env, "inheritance", msg, t.pos)            
-          end
-        end
-      end
-      def[6] = new_interfaces
-      tlst.end_scope(env) -- class type parameters
-    end
-  end
-  
-  --insert nominal subtyping edges for implements clauses
-  for _,def in ipairs(defs) do
-    if def.tag == "Class" then
-      local name, tpars, interfaces = def[1], def[5], def[6]
-      local typename = make_typename(env, name, is_local)
-      tlst.begin_scope(env) --class type parameters
-      tlst.set_tpars(env, tpars)
-      local t_instance,_,_,_ = get_class_types(env, def, is_local)
-      for i,t in ipairs(interfaces) do
-        assert(t.tag == "TSymbol")
-        local succ, explanation = tlsubtype.consistent_subtype(env, t_instance, tlsubtype.unfold(env, t))
-        if succ then
-          env.scope = env.scope - 1 --add nominal edge to the scope above this class's scope
-          local succ, msg =  tlst.add_nominal_edge(env, typename, t[1], t[2], tltype.substitutes, is_local)
-          if not succ then
-            typeerror(env, "implements", msg, t.pos)
-          end
-          env.scope = env.scope + 1
-        else
-          local par_tsymbols = {}
-          for i,v in ipairs(tpars) do par_tsymbols[i] = tltype.Symbol(v[1]) end
-          local def_tsymbol = tltype.Symbol(env, make_typename(name, is_local), par_tsymbols)
-          local msg = "%s is not a subtype of %s"
-          msg = string.format(msg, tltype.tostring(def_tsymbol), tltype.tostring(t))
-          typeerror(env, "inheritance", msg .. "\n" .. explanation, t.pos)
-        end
-      end
-      tlst.end_scope(env) -- class type parameters
-    end
-  end
+  --add nominal subtyping edges for implements clauses
+  --also, check their soundness
+  check_bundle_implements(env, defs)
   
   -- typecheck all class code
   for _, def in ipairs(defs) do

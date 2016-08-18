@@ -5,6 +5,10 @@ Miscellaneous utility functions
 local tlutils = {}
 
 function tlutils.abbreviate(typename)
+  if(type(typename) ~= "string") then
+    assert(false)
+  end
+  
   local rev = string.reverse(typename)
   local dotpos = string.find(rev, "%.")
   if dotpos == nil then
