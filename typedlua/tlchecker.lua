@@ -1045,7 +1045,7 @@ local function check_function (env, exp)
     ret_type = Any
     exp[2] = Any
   end
-  local infer_return = false
+  local infer_return = (ret_type ~= false)
   tlst.begin_function(env)
   tlst.begin_scope(env)
   -- add type params to environment

@@ -262,17 +262,9 @@ local function subtype_table (assume, env, t1, t1_str, t2, t2_str, relation)
       for i = 1, m do
         for j = 1, n do
           local s1, s2 = tltype.tostring(t1[i][1]), tltype.tostring(t2[j][1])
-          if s1 == "1" and s2 == "2" then
-            local a = 5
-            a = 4
-          end
-          if t1[i][1] == 1 and t2[j][1] == 2 then
-            local a = 5
-            a = 4
-          end          
           if subtype(assume, env, t1[i][1], t2[j][1], relation) then
             local succ, explanation = subtype_field(assume, env, t2[j], t1[i], relation) 
-            if not succ then
+            if succ then
               if not l[j] then
                 k = k + 1
                 l[j] = true
@@ -491,7 +483,7 @@ local function subtype_tuple (assume, env, t1, t1_str, t2, t2_str, relation)
         local s1,s2 = tltype.tostring(t1[i]), tltype.tostring(t2[i])
         local ord = tlutils.order_description(i)
         local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
-        local component = string.format("%dth component %s is not a subtype of %s", ord, s1, s2)
+        local component = string.format("%s component %s is not a subtype of %s", ord, s1, s2)
         local msg = problem .. "\n" .. component .. "\n" .. explanation
         return false, msg
       end
@@ -561,12 +553,9 @@ local function subtype_tuple (assume, env, t1, t1_str, t2, t2_str, relation)
 end
 
 function subtype (assume, env, t1, t2, relation, verbose)  
-  if relation == "<:" and tltype.isAny(t1) and tltype.isAny(t2) then
+  if relation == "<:" and (tltype.isAny(t1) and tltype.isAny(t2)) then
     return true
-  elseif relation == "<:" and (tltype.isAny(t1) or tltype.isAny(t2)) then
-    local t1_str, t2_str = tltype.tostring(t1), tltype.tostring(t2)
-    return false, string.format("%s is not a subtype of %s", t1_str, t2_str)
-  elseif tltype.isAny(t1) or tltype.isAny(t2) then
+  elseif relation == "<~" and (tltype.isAny(t1) or tltype.isAny(t2)) then
     return true
   elseif tltype.isValue(t2) then
     return true

@@ -140,7 +140,7 @@ local G = lpeg.P { "TypedLua";
   ClassConcreteMethodDef =  lpeg.Cp() * tllexer.kw("method") *
                          lpeg.V("Id") * (lpeg.V("InvTypeParams") + lpeg.Cc({})) * 
                          tllexer.symb("(") * lpeg.V("ParList") * tllexer.symb(")") *
-                         tllexer.symb(":") * lpeg.V("RetType") * 
+                         (tllexer.symb(":") * lpeg.V("RetType") + lpeg.Cc(tltype.Tuple({tltype.Nil()},true))) * 
                          lpeg.V("Block") * tllexer.kw("end") / 
                          tlast.classElementConcreteMethod;
   
