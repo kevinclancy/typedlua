@@ -1750,36 +1750,38 @@ local function check_if (env, stm)
       if exp.tag == "Id" then
         local name = exp[1]
         local var = tlst.get_local(env, name)
-        if not tltype.isUnionlist(get_type(var)) then
-          if not var.bkp then var.bkp = get_type(var) end
+        local vartype = tlsubtype.unfold(env, get_type(var))
+        if not tltype.isUnionlist(vartype) then
+          if not var.bkp then var.bkp = vartype end
           var.filter = Nil
-          set_type(env, var, tlsubtype.filterUnion(env, get_type(var), Nil))
+          set_type(env, var, tlsubtype.filterUnion(env, vartype, Nil))
           l[name] = var
         else
-          local idx = get_index(get_type(var), Nil, var.i)
+          local idx = get_index(vartype, Nil, var.i)
           if idx then
-            var.filter = table.remove(get_type(var), idx)
+            var.filter = table.remove(vartype, idx)
             l[name] = var
           end
         end
       elseif exp.tag == "Op" and exp[1] == "not" and exp[2].tag == "Id" then
         local name = exp[2][1]
         local var = tlst.get_local(env, name)
-        if not tltype.isUnionlist(get_type(var)) then
+        local vartype = tlsubtype.unfold(env, get_type(var))
+        if not tltype.isUnionlist(vartype) then
           if not var.bkp then var.bkp = get_type(var) end
           if not var.filter then
-            var.filter = tltype.filterUnion(env, get_type(var), Nil)
+            var.filter = tltype.filterUnion(env, vartype, Nil)
           else
             var.filter = tltype.filterUnion(env, var.filter, Nil)
           end
           set_type(env, var, Nil)
           l[name] = var
         else
-          local idx = get_index(get_type(var), Nil, var.i)
+          local idx = get_index(vartype, Nil, var.i)
           if idx then
-            var.filter = table.remove(get_type(var), idx)
-            local bkp = table.remove(get_type(var))
-            table.insert(get_type(var), var.filter)
+            var.filter = table.remove(vartype, idx)
+            local bkp = table.remove(vartype)
+            table.insert(vartype, var.filter)
             var.filter = bkp
             l[name] = var
           end
@@ -1789,21 +1791,22 @@ local function check_if (env, stm)
              exp[2][2].tag == "Id" then
         local name = exp[2][2][1]
         local var = tlst.get_local(env, name)
+        local vartype = tlsubtype.unfold(env, get_type(var))
         local t = tag2type(get_type(exp[3]))
-        if not tltype.isUnionlist(get_type(var)) then
-          if not var.bkp then var.bkp = get_type(var) end
+        if not tltype.isUnionlist(vartype) then
+          if not var.bkp then var.bkp = vartype end
           if not var.filter then
-            var.filter = tltype.filterUnion(env, get_type(var), t)
+            var.filter = tltype.filterUnion(env, vartype, t)
           else
             var.filter = tltype.filterUnion(env, var.filter, t)
           end
           set_type(env, var, t)
           l[name] = var
         else
-          local idx = get_index(get_type(var), t, var.i)
+          local idx = get_index(vartype, t, var.i)
           if idx then
-            var.filter = table.remove(get_type(var), idx)
-            local bkp = table.remove(get_type(var))
+            var.filter = table.remove(vartype, idx)
+            local bkp = table.remove(vartype)
             table.insert(get_type(var), var.filter)
             var.filter = bkp
             l[name] = var
@@ -1815,9 +1818,10 @@ local function check_if (env, stm)
              exp[2][2][2].tag == "Id" then
         local name = exp[2][2][2][1]
         local var = tlst.get_local(env, name)
+        local vartype = tlsubtype.unfold(env, get_type(var))
         local t = tag2type(get_type(exp[2][3]))
-        if not tltype.isUnionlist(get_type(var)) then
-          if not var.bkp then var.bkp = get_type(var) end
+        if not tltype.isUnionlist(vartype) then
+          if not var.bkp then var.bkp = vartype end
           var.filter = t
           set_type(env, var, tltype.filterUnion(env, get_type(var), t))
           l[name] = var
@@ -1848,7 +1852,8 @@ local function check_if (env, stm)
   end
   if not isallret then
     for k, v in pairs(l) do
-      if not tltype.isUnionlist(get_type(v)) then
+      local vartype = tlsubtype.unfold(env, get_type(v))
+      if not tltype.isUnionlist(vartype) then
         set_type(env, v, v.bkp)
       else
         table.insert(get_type(v), v.filter)
