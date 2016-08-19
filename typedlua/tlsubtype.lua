@@ -336,18 +336,13 @@ local function subtype_symbol (assume, env, t1, t1_str, t2, t2_str, relation)
   local problem = "%s is not a subtype of %s"
   problem = string.format(problem, t1_str, t2_str)    
       
-  if t2_symbol and ti2 == nil then
-    assert(false)
-  end
-      
   -- handle bounded variables
   if t1_symbol and ti1.tag == "TIVariable" then
     if ti2 and ti2.tag == "TIVariable" and ti1[3] == ti2[3] then
       return true --if names are equal then return true
-    elseif ti1[1] ~= "NoBound" then
-      return subtype(assume, env, ti1[1], t2, relation)  
     else
-      return false, problem
+      local succ, msg = subtype(assume, env, ti1[1], t2, relation)  
+      return succ, msg
     end
   end
   
@@ -368,26 +363,7 @@ local function subtype_symbol (assume, env, t1, t1_str, t2, t2_str, relation)
     --we know t1 isn't a userdata, so the subtype relation does not hold
     return false, problem
   end 
-  
-  --handle structural
-  if t1_symbol and ti1.tag == "TIStructural" then
-    local succ, explanation = subtype(assume, env, ti1[1], t2, relation)
-    if succ then
-      return true
-    else
-      return false, problem .. "\n" .. explanation
-    end
-  end 
-  
-  if t2_symbol and ti2.tag == "TIStructural" then
-    local succ, explanation = subtype(assume, env, t1, ti2[1], relation)
-    if succ then
-      return true
-    else
-      return false, problem .. "\n" .. explanation
-    end
-  end 
-  
+    
   if t1_symbol and ti1.tag == "TINominal" and t2_symbol and ti2.tag == "TINominal" then
     local nominal_edges = {}
     tlst.get_nominal_edges(env,t1[1],t2[1],nominal_edges)
@@ -547,7 +523,7 @@ local function subtype_tuple (assume, env, t1, t1_str, t2, t2_str, relation)
         local ord = tlutils.order_description(k)
         local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
         local component = string.format("%s component", ord, s1, s2)
-        local msg = problem .. "\n" .. component .. "\n" .. explanation        
+        local msg = problem .. "\n" .. component .. explanation        
         return false, msg        
       end
     end
@@ -581,7 +557,22 @@ function subtype (assume, env, t1, t2, relation, verbose)
   local key =  t1_str .. "@" .. t2_str
   if assume[key] then return true end
   assume[key] = true
-    
+
+  -- expanding structural typedefs if either t1 or t2 matches
+  if tltype.isSymbol(t1) then
+    local ti1 = tlst.get_typeinfo(env, t1[1])
+    if ti1.tag == "TIStructural" then
+      t1 = tlsubtype.unfold(env, t1)
+    end
+  end
+  if tltype.isSymbol(t2) then
+    local ti2 = tlst.get_typeinfo(env, t2[1])
+    if ti2.tag == "TIStructural" then
+      t2 = tlsubtype.unfold(env, t2)
+    end
+  end  
+
+
   if tltype.isUnionlist(t1) then
     for k, v in ipairs(t1) do
       local succ, msg = subtype(assume, env, v, t2, relation)
@@ -609,7 +600,11 @@ function subtype (assume, env, t1, t2, relation, verbose)
   elseif tltype.isUnion(t1) or tltype.isUnion(t2) then
     local ret,msg = subtype_union(assume, env, t1, t1_str, t2, t2_str, relation)
     assume[key] = nil
-    return ret, msg
+    return ret, msg 
+  elseif tltype.isSymbol(t1) or tltype.isSymbol(t2) then
+    local ret,msg = subtype_symbol(assume, env, t1, t1_str, t2, t2_str, relation, verbose)      
+    assume[key] = nil
+    return ret, msg       
   elseif tltype.isTuple(t1) and tltype.isTuple(t2) then
     local ret,msg = subtype_tuple(assume, env, t1, t1_str, t2, t2_str, relation)
     assume[key] = nil
@@ -634,10 +629,6 @@ function subtype (assume, env, t1, t2, relation, verbose)
     local ret,msg = subtype_function(assume, env, t1, t1_str, t2, t2_str, relation)
       assume[key] = nil
       return ret, msg
-  elseif tltype.isSymbol(t1) or tltype.isSymbol(t2) then
-    local ret,msg = subtype_symbol(assume, env, t1, t1_str, t2, t2_str, relation, verbose)      
-    assume[key] = nil
-    return ret, msg
   elseif tltype.isTable(t1) and tltype.isTable(t2) then
     local ret,msg = subtype_table(assume, env, t1, t1_str, t2, t2_str, relation)
     assume[key] = nil
