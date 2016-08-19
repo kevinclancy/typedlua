@@ -78,7 +78,7 @@ tllexer.Skip = (Space + Comment)^0
 local idStart = lpeg.alpha + lpeg.P("_")
 --characters which may appear after the first character of an identifier
 local idRest = lpeg.alnum + lpeg.P("_")
-local typeIdRest = lpeg.alnum + lpeg.P(".") + lpeg.P("_")
+local typeIdRest = lpeg.alnum + lpeg.P(".") + lpeg.P("_") + lpeg.P("-")
 
 local Keywords = lpeg.P("and") + "break" + "do" + "elseif" + "else" + "end" +
                  "false" + "for" + "function" + "goto" + "if" + "in" +
