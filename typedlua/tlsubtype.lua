@@ -116,6 +116,12 @@ end
 
 local function subtype_function (assume, env, t1, t1_str, t2, t2_str, relation)
   if tltype.isFunction(t1) and tltype.isFunction(t2) then
+    local npars1, npars2 = #(t1[3]), #(t2[3])
+    if npars1 > 0 or npars2 > 0 then
+      local msg = "%s is not a subtype of %s: subtyping can't handle type parameters"
+      msg = string.format(msg, t1_str, t2_str)
+      return false, msg
+    end    
     local succ1, msg1 = subtype(assume, env, t2[1], t1[1], relation)
     if not succ1 then
       local problem = string.format("%s is not a subtype of %s", t1_str, t2_str)
@@ -627,8 +633,8 @@ function subtype (assume, env, t1, t2, relation, verbose)
     return ret, msg
   elseif tltype.isFunction(t1) and tltype.isFunction(t2) then
     local ret,msg = subtype_function(assume, env, t1, t1_str, t2, t2_str, relation)
-      assume[key] = nil
-      return ret, msg
+    assume[key] = nil
+    return ret, msg
   elseif tltype.isTable(t1) and tltype.isTable(t2) then
     local ret,msg = subtype_table(assume, env, t1, t1_str, t2, t2_str, relation)
     assume[key] = nil
