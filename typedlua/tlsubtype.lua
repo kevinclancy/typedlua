@@ -16,9 +16,6 @@ local function unfold_aux (memo, env, t)
   memo[s] = true
   if t.tag == "TSymbol" then
     local ti = tlst.get_typeinfo(env,t[1])
-    if not ti then
-      assert(false)
-    end
     if ti.tag == "TIUserdata" then
       return unfold_aux(memo, env, ti[1])
     elseif ti.tag == "TIStructural" then
@@ -46,6 +43,26 @@ end
 
 function tlsubtype.unfold (env, t)
   return unfold_aux({}, env, t)
+end
+
+local function unfold_structural_aux (memo, env, t)
+  local s = tltype.tostring(t)
+  if memo[s] then return tltype.Any() end
+  memo[s] = true
+  if t.tag == "TSymbol" then
+    local ti = tlst.get_typeinfo(env,t[1])
+    if ti.tag == "TIStructural" then
+      return unfold_structural_aux(memo, env, ti[1])
+    else
+      return t
+    end
+  else
+    return t
+  end
+end
+
+function tlsubtype.unfold_structural (env, t)
+  return unfold_structural_aux({}, env, t)
 end
 
 local function subtype_literal (assume, env, t1, t2)
@@ -568,16 +585,19 @@ function subtype (assume, env, t1, t2, relation, verbose)
   if tltype.isSymbol(t1) then
     local ti1 = tlst.get_typeinfo(env, t1[1])
     if ti1.tag == "TIStructural" then
-      t1 = tlsubtype.unfold(env, t1)
+      t1 = tlsubtype.unfold_structural(env, t1)
     end
   end
   if tltype.isSymbol(t2) then
     local ti2 = tlst.get_typeinfo(env, t2[1])
     if ti2.tag == "TIStructural" then
-      t2 = tlsubtype.unfold(env, t2)
+      t2 = tlsubtype.unfold_structural(env, t2)
     end
   end  
-
+  
+  if t1_str == "Foo2" then
+    assert(true)
+  end
 
   if tltype.isUnionlist(t1) then
     for k, v in ipairs(t1) do

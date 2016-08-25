@@ -2608,11 +2608,257 @@ local function make_tmethod (tpars, parlist, rettype)
   return tltype.Function(tpars, t1, t2, true)
 end
 
+
+--collects the typenames of a bundle and checks for
+--duplicate type definitions
+local function bundle_collect_typenames(env, bundle)
+  local defs = bundle[1]
+  local is_local = env.scope > 1
+  local bundle_typenames = {}
+  --collect typenames and check for duplicates
+  for _,def in ipairs(defs) do
+    local name = def[1][1]
+    local typename = make_typename(env, def[1], is_local)
+    def[1].global_name = typename
+    if tlst.get_typeinfo(env, typename) or bundle_typenames[typename] then
+      local msg = "attempt to redeclare type '%s'"
+      msg = string.format(msg, typename)
+      typeerror(env, "alias", msg, def.pos)
+      return false
+    else
+      tlst.set_typealias(env, name, typename)
+      bundle_typenames[typename] = true
+    end
+  end
+  return bundle_typenames
+end
+
+--kindcheck the bounds of all type parameters of all classes,
+--interfaces, and shapes in a bundle
+local function bundle_kindcheck_bounds (env, bundle, bundle_typenames)
+  local defs = bundle[1]
+  --kindcheck bounds on class and interface definitions
+  for _,def in ipairs(defs) do
+    if def.tag == "Class" or def.tag == "Interface" then
+      local tpars
+      if def.tag == "Class" then tpars = def[5]
+      elseif def.tag == "Interface" then tpars = def[2] end
+      kindcheck_tpars(env, tpars, bundle_typenames)
+    end
+  end  
+end
+
+--kindcheck the inheritance clauses of all classes in a bundle
+--return false if the outer nominal type application is not well-kinded (we can't add an edge in this case)
+local function bundle_kindcheck_inheritance (env, bundle, bundle_typenames)
+  local defs = bundle[1]
+  for _,def in ipairs(defs) do
+    if def.tag == "Class" then
+      local tsuper = def[4]
+      if tsuper ~= "NoParent" then
+        tlst.begin_scope(env) --kindcheck inheritance clause
+        tlst.set_tpars(env, def[5])
+        local context = { 
+          tag = "Inheritance", 
+          desc = "inheritance clause", 
+          bundle_typenames = bundle_typenames 
+        }
+        if not kindcheck(env, tsuper, false, context) then
+          -- we can't inherit from Any, so we just abort typechecking the budle if this happens,
+          -- and leave the environment untouched by this bundle definitions
+          tlst.end_scope(env)
+          return false
+        end 
+        tlst.end_scope(env)  --check inheritance clause
+      end
+    end
+  end  
+  return true
+end
+
+--for each type contained in a bundle, insert a stub typeinfo, which contains kind information,
+--but not type definitions. this is done in preparation for arity kindchecking.
+local function bundle_insert_type_stubs (env, bundle)
+  local is_local = env.scope > 1
+  local defs = bundle[1]
+  for _,def in ipairs(defs) do
+    if def.tag == "Typedef" then
+      local name = def[1][1]
+      local typename = make_typename(env, def[1], is_local)
+      local ti = tlst.typeinfo_Structural(Any)
+      tlst.set_typeinfo(env, typename, ti, is_local)
+    elseif def.tag == "Class" or def.tag == "Interface" then
+      local name = def[1]
+      local tparams = def.tag == "Class" and def[5] or def[2]
+      local typename = make_typename(env, name, is_local)      
+      local ti = tlst.typeinfo_Nominal(typename, Any, tparams, def.is_shape)
+      tlst.set_typeinfo(env, typename, ti, is_local)
+    end
+  end  
+end
+
+--arity kindcheck the definitions of each of the types contained in a bundle
+local function bundle_arity_kindcheck (env, bundle)
+  local defs = bundle[1]
+  for _,def in ipairs(defs) do
+    if def.tag == "Typedef" then
+      local t = def[2]
+      if not kindcheck_arity(env, t, false) then
+        def[2] = Any
+      end
+    elseif def.tag == "Class" or def.tag == "Interface" then
+      tlst.begin_scope(env) -- type parameters for the class definition.
+      local elems = def[3] 
+      local tpars = (def.tag == "Class" and def[5]) or (def.tag == "Interface" and def[2])
+      tlst.set_tpars(env, tpars)
+      kindcheck_arity_class_elems(env, elems)
+      tlst.end_scope(env)
+    end
+  end  
+end
+
+--add reflexive edges on each nominal type in the bundle
+local function bundle_add_reflexive_edges (env, bundle)
+  local defs = bundle[1]
+  local is_local = env.scope > 1
+  for _,def in ipairs(defs) do
+    if def.tag == "Class" or def.tag == "Interface" then
+      local typename = make_typename(env, def[1], is_local)
+      local tparams = def.tag == "Class" and def[5] or def[2]
+      tlst.add_reflexive_edge(env, typename, tparams)
+    end
+  end  
+end
+
+--add nominal edges for each inheritance clause in the bundle
+--return false if such edges would create a type cycle
+local function bundle_add_inheritance_edges (env, bundle)
+  local defs = bundle[1]
+  for _,def in ipairs(defs) do
+    if def.tag == "Class" then
+      local name, tsuper = def[1], def[4]
+      local typename = make_typename(env, name, is_local)
+      if tsuper ~= "NoParent" then
+        local succ, msg = tlst.add_nominal_edge(env, typename, tsuper[1], tsuper[2], tltype.substitutes, is_local)
+        if not succ then
+          typeerror(env, "inheritance", msg, tsuper.pos)
+          return false
+        end
+      end
+    end
+  end  
+  return true
+end
+
+--insert full arity-kindchecked type definitions for all bundle types 
+--into the environment
+local function bundle_insert_full_defs (env, bundle)
+  local is_local = env.scope > 1
+  local defs = bundle[1]
+  for _,def in ipairs(defs) do
+    if def.tag == "Typedef" then
+      local name,t = def[1],def[2]
+      local typename = make_typename(env, name, is_local)
+      local ti = tlst.typeinfo_Structural(t)
+      tlst.set_typeinfo(env, typename, ti, is_local)
+    elseif def.tag == "Class" then
+      local name, tparams = def[1], def[5]
+      local typename = make_typename(env, name, is_local)
+      local t_instance, t_class, instance_members, superclass_members = get_class_types(env, def, is_local)
+      local ti = tlst.typeinfo_Nominal(typename, t_instance, tparams, false)
+      tlst.set_typeinfo(env, typename, ti, is_local)
+      tlst.set_classtype(env, typename, t_class, is_local)
+      set_type(env, name, t_class)
+      tlst.set_local(env, name)
+    elseif def.tag == "Interface" then
+      local name, tparams = def[1], def[2]
+      local t_interface = get_interface_type(env, def)
+      local typename = make_typename(env, name, is_local)
+      local ti = tlst.typeinfo_Nominal(typename, t_interface, tparams, def.is_shape)
+      tlst.set_typeinfo(env, typename, ti, is_local)
+    end
+  end  
+end
+
+--check soundness of inheritance (i.e. 'extends') subtyping edges
+local function bundle_subtypecheck_inheritance (env, bundle)
+  local defs = bundle[1]
+  for _,def in ipairs(defs) do
+    if def.tag == "Class" then
+      local tsuper = def[4]
+      if tsuper ~= "NoParent" then
+        local class_name_id, class_tpars = def[1], def[5]
+        local class_name = tlst.get_typealias(env, class_name_id[1])
+        local tinstance = tltype.Symbol(class_name, tlast.paramSymbols(class_tpars))
+        tlst.begin_scope(env) --tpars
+        tlst.set_tpars(env, class_tpars)
+        local succ,msg = check_nominal_edge(env, tinstance, tsuper)
+        tlst.end_scope(env) --tpars
+      end 
+    end
+  end  
+end
+
+--boundcheck the definitions (i.e. bodies) of all classes, interfaces, shapes, 
+--and typedefs
+local function bundle_boundcheck_defs (env, bundle)
+  local defs = bundle[1]
+  for _,def in ipairs(defs) do
+    if def.tag == "Class" then
+      local name, elems, tsuper, tpars = def[1], def[3], def[4], def[5]
+      tlst.begin_scope(env) -- class type parameters
+      tlst.set_tpars(env, tpars)
+      for _,elem in ipairs(elems) do
+        if elem.tag == "ConcreteClassMethod" then
+          local parlist, tret, tpars = elem[2], elem[3], elem[5]
+          tlst.begin_scope(env) --tpars
+          tlst.set_tpars(env, tpars)
+          for i,par in ipairs(parlist) do
+            tlst.set_variance(env, "Contravariant")
+            if not kindcheck(env, par[2], false) then
+              parlist[i][2] = Any
+            end
+          end
+          tlst.set_variance(env, "Covariant")
+          if not kindcheck(env, tret, false) then
+            elem[3] = Any
+          end
+          tlst.end_scope(env) --tpars
+        end
+      end
+      tlst.end_scope(env) -- class type parameters
+    elseif def.tag == "Interface" then
+      local name, tpars, elems = def[1], def[2], def[3]
+      tlst.begin_scope(env) -- class type parameters
+      tlst.set_tpars(env, tpars)
+      for _,elem in ipairs(elems) do
+        if elem.tag == "AbstractClassMethod" then
+          local name, ty, method_tpars = elem[1], elem[2], elem[3]
+          ty[3] = method_tpars
+          tlst.set_variance(env, "Covariant")
+          local success = kindcheck(env, ty, false)
+          assert(success) --method types must be functions, so kindchecking will not fail at the top level
+        else
+          assert(false, "interfaces can only contain abstract methods")
+        end
+      end
+      tlst.end_scope(env) -- class type parameters      
+    elseif def.tag == "Typedef" then
+      if not kindcheck(env, def[2], false) then
+        def[2] = Any
+      end
+    end
+  end  
+end
+
+
 --1.) kindcheck all interface clauses
 --2.) add nominal subtyping edges for all implements clauses in bundle _defs_ 
 --3.) also, generate type errors if any of these edges are unsound
 --(whether they are sound or not, we leave the edges in the environment)
-local function check_bundle_implements(env, defs, is_local)
+local function bundle_check_implements(env, bundle)
+  local defs = bundle[1]
+  local is_local = env.scope > 1
   --insert all edges into nominal subtyping graph
   for _,def in ipairs(defs) do
     if def.tag == "Class" then
@@ -2660,216 +2906,9 @@ local function check_bundle_implements(env, defs, is_local)
   return true
 end
 
-local function check_typebundle (env, stm)
-  assert(stm.tag == "TypeBundle")
-  local defs = stm[1]
-  local is_local = env.scope > 1
-  
-  local bundle_typenames = {}
-  --collect typenames and check for duplicates
-  for _,def in ipairs(defs) do
-    local name = def[1][1]
-    local typename = make_typename(env, def[1], is_local)
-    def[1].global_name = typename
-    if tlst.get_typeinfo(env, typename) or bundle_typenames[typename] then
-      local msg = "attempt to redeclare type '%s'"
-      msg = string.format(msg, typename)
-      typeerror(env, "alias", msg, def.pos)
-      return false
-    else
-      tlst.set_typealias(env, name, typename)
-      bundle_typenames[typename] = true
-    end
-  end
-  
-  --kindcheck bounds on class and interface definitions
-  for _,def in ipairs(defs) do
-    if def.tag == "Class" or def.tag == "Interface" then
-      local tpars
-      if def.tag == "Class" then tpars = def[5]
-      elseif def.tag == "Interface" then tpars = def[2] end
-      kindcheck_tpars(env, tpars, bundle_typenames)
-    end
-  end
-  
-  --kindcheck inheritance clauses
-  for _,def in ipairs(defs) do
-    if def.tag == "Class" then
-      local tsuper = def[4]
-      if tsuper ~= "NoParent" then
-        tlst.begin_scope(env) --kindcheck inheritance clause
-        tlst.set_tpars(env, def[5])
-        local context = { 
-          tag = "Inheritance", 
-          desc = "inheritance clause", 
-          bundle_typenames = bundle_typenames 
-        }
-        if not kindcheck(env, tsuper, false, context) then
-          -- we can't inherit from Any, so we just abort typechecking the budle if this happens,
-          -- and leave the environment untouched by this bundle definitions
-          tlst.end_scope(env)
-          return false
-        end 
-        tlst.end_scope(env)  --check inheritance clause
-      end
-    end
-  end
-  
-  -- insert type stubs for bundle definitions, for the purpose of arity kindchecking
-  for _,def in ipairs(defs) do
-    if def.tag == "Typedef" then
-      local name = def[1][1]
-      local typename = make_typename(env, def[1], is_local)
-      local ti = tlst.typeinfo_Structural(Any)
-      tlst.set_typeinfo(env, typename, ti, is_local)
-    elseif def.tag == "Class" or def.tag == "Interface" then
-      local name = def[1]
-      local tparams = def.tag == "Class" and def[5] or def[2]
-      local typename = make_typename(env, name, is_local)      
-      local ti = tlst.typeinfo_Nominal(typename, Any, tparams, def.is_shape)
-      tlst.set_typeinfo(env, typename, ti, is_local)
-    end
-  end
-  
-  --arity kindcheck the definitions of each type defined in the bundle
-  for _,def in ipairs(defs) do
-    if def.tag == "Typedef" then
-      local t = def[2]
-      if not kindcheck_arity(env, t, false) then
-        def[2] = Any
-      end
-    elseif def.tag == "Class" or def.tag == "Interface" then
-      tlst.begin_scope(env) -- type parameters for the class definition.
-      local elems = def[3] 
-      local tpars = (def.tag == "Class" and def[5]) or (def.tag == "Interface" and def[2])
-      tlst.set_tpars(env, tpars)
-      kindcheck_arity_class_elems(env, elems)
-      tlst.end_scope(env)
-    end
-  end
-  
-  --add reflexive edges for each nominal type
-  for _,def in ipairs(defs) do
-    if def.tag == "Class" or def.tag == "Interface" then
-      local typename = make_typename(env, def[1], is_local)
-      local tparams = def.tag == "Class" and def[5] or def[2]
-      tlst.add_reflexive_edge(env, typename, tparams)
-    end
-  end
-  
-  --add nominal edges for each inheritance clause in the bundle
-  for _,def in ipairs(defs) do
-    if def.tag == "Class" then
-      local name, tsuper = def[1], def[4]
-      local typename = make_typename(env, name, is_local)
-      if tsuper ~= "NoParent" then
-        local succ, msg = tlst.add_nominal_edge(env, typename, tsuper[1], tsuper[2], tltype.substitutes, is_local)
-        if not succ then
-          typeerror(env, "inheritance", msg, tsuper.pos)
-          return false
-        end
-      end
-    end
-  end
-  
-  -- replace bundle stubs with full type definitions, so that we can perform bound kindchecking
-  -- and method covariance checking, add class types, instance types, and local class names to environment
-  for _,def in ipairs(defs) do
-    if def.tag == "Typedef" then
-      local name,t = def[1],def[2]
-      local typename = make_typename(env, name, is_local)
-      local ti = tlst.typeinfo_Structural(t)
-      tlst.set_typeinfo(env, typename, ti, env.scope > 1)
-    elseif def.tag == "Class" then
-      local name, tparams = def[1], def[5]
-      local typename = make_typename(env, name, is_local)
-      local t_instance, t_class, instance_members, superclass_members = get_class_types(env, def, is_local)
-      local ti = tlst.typeinfo_Nominal(typename, t_instance, tparams, false)
-      tlst.set_typeinfo(env, typename, ti, is_local)
-      tlst.set_classtype(env, typename, t_class, is_local)
-      set_type(env, name, t_class)
-      --NOTE: reassigning this local leads to a confusing (albeit safe) situation, so it would be good
-      --to have const locals in this scenario
-      tlst.set_local(env, name)
-    elseif def.tag == "Interface" then
-      local name, tparams = def[1], def[2]
-      local t_interface = get_interface_type(env, def)
-      local typename = make_typename(env, name, is_local)
-      local ti = tlst.typeinfo_Nominal(typename, t_interface, tparams, def.is_shape)
-      tlst.set_typeinfo(env, typename, ti, is_local)
-    end
-  end
-    
-  --check soundness of inheritance (i.e. 'extends') subtyping edges
-  for _,def in ipairs(defs) do
-    if def.tag == "Class" then
-      local tsuper = def[4]
-      if tsuper ~= "NoParent" then
-        local class_name_id, class_tpars = def[1], def[5]
-        local class_name = tlst.get_typealias(env, class_name_id[1])
-        local tinstance = tltype.Symbol(class_name, tlast.paramSymbols(class_tpars))
-        tlst.begin_scope(env) --check class methods covariant
-        --insert type parameters
-        tlst.set_tpars(env, class_tpars)
-        local succ,msg = check_nominal_edge(env, tinstance, tsuper)
-        tlst.end_scope(env) --check class methods covariant
-      end 
-    end
-  end
-  
-  -- boundcheck type definition bodies
-  for _,def in ipairs(defs) do
-    if def.tag == "Class" then
-      local name, elems, tsuper, tpars = def[1], def[3], def[4], def[5]
-      tlst.begin_scope(env) -- class type parameters
-      tlst.set_tpars(env, tpars)
-      for _,elem in ipairs(elems) do
-        if elem.tag == "ConcreteClassMethod" then
-          local parlist, tret, tpars = elem[2], elem[3], elem[5]
-          tlst.begin_scope(env) --tpars
-          tlst.set_tpars(env, tpars)
-          for i,par in ipairs(parlist) do
-            tlst.set_variance(env, "Contravariant")
-            if not kindcheck(env, par[2], false) then
-              parlist[i][2] = Any
-            end
-          end
-          tlst.set_variance(env, "Covariant")
-          if not kindcheck(env, tret, false) then
-            elem[3] = Any
-          end
-          tlst.end_scope(env) --tpars
-        end
-      end
-      tlst.end_scope(env) -- class type parameters
-    elseif def.tag == "Interface" then
-      local name, tpars, elems = def[1], def[2], def[3]
-      tlst.begin_scope(env) -- class type parameters
-      tlst.set_tpars(env, tpars)
-      for _,elem in ipairs(elems) do
-        if elem.tag == "AbstractClassMethod" then
-          local name, ty, method_tpars = elem[1], elem[2], elem[3]
-          ty[3] = method_tpars
-          tlst.set_variance(env, "Covariant")
-          local success = kindcheck(env, ty, false)
-          assert(success) --method types must be functions, so kindchecking will not fail at the top level
-        else
-          assert(false, "interfaces can only contain abstract methods")
-        end
-      end
-      tlst.end_scope(env) -- class type parameters      
-    elseif def.tag == "Typedef" then
-      if not kindcheck(env, def[2], false) then
-        def[2] = Any
-      end
-    end
-  end
-
-  --add nominal subtyping edges for implements clauses
-  --also, check their soundness
-  check_bundle_implements(env, defs)
-  
-  -- typecheck all class code
+--typecheck all of the code blocks contained in class definitions in the bundle
+local function bundle_typecheck_classcode (env, bundle)
+  local defs = bundle[1]
   for _, def in ipairs(defs) do
     if def.tag == "Class" then
       local name, elems, tsuper, tpars = def[1], def[3], def[4], def[5]
@@ -2887,7 +2926,28 @@ local function check_typebundle (env, stm)
       tlst.end_scope(env) -- class type parameters
     end
   end
-  
+end
+
+local function check_typebundle (env, stm)
+  assert(stm.tag == "TypeBundle")
+  local bundle_typenames = bundle_collect_typenames(env, stm)
+  bundle_kindcheck_bounds(env, stm, bundle_typenames)
+  local salvageable = bundle_kindcheck_inheritance(env, stm, bundle_typenames)
+  if not salvageable then
+    return false
+  end
+  bundle_insert_type_stubs(env, stm)
+  bundle_arity_kindcheck(env, stm)
+  bundle_add_reflexive_edges(env, stm)
+  local no_cycles_detected = bundle_add_inheritance_edges(env, stm)
+  if not no_cycles_detected then
+    return false
+  end
+  bundle_insert_full_defs(env, stm)
+  bundle_subtypecheck_inheritance(env, stm)
+  bundle_boundcheck_defs(env, stm)
+  bundle_check_implements(env, stm) --this performs kindchecking and typechecking
+  bundle_typecheck_classcode(env, stm)
   return true
 end
 
